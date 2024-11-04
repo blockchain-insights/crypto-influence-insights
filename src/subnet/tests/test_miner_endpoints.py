@@ -64,4 +64,4 @@ async def test_bitcoin_balance_tracking_challenge(setup_miner_with_node):
 async def test_bitcoin_discovery_challenge(setup_miner):
     miner, settings = await setup_miner  # Await the fixture
     result = await miner.discovery(validator_version=VERSION, validator_key="test_validator_key")
-    assert result['network'] == settings.NETWORK
+    assert result['tokens'] == settings.TOKENS

@@ -9,8 +9,8 @@ from loguru import logger
 from starlette.middleware.cors import CORSMiddleware
 from src.subnet import VERSION
 from src.subnet.miner._config import MinerSettings, load_environment
-from src.subnet.miner.blockchain.search import GraphSearchFactory, BalanceSearchFactory
-from src.subnet.protocol import Challenge, MODEL_KIND_FUNDS_FLOW, MODEL_KIND_BALANCE_TRACKING
+from src.subnet.miner import GraphSearch
+from src.subnet.protocol import TwitterChallenge, MODEL_KIND_FUNDS_FLOW, MODEL_KIND_BALANCE_TRACKING
 from src.subnet.validator.database import db_manager
 
 
@@ -19,17 +19,16 @@ class Miner(Module):
     def __init__(self, settings: MinerSettings):
         super().__init__()
         self.settings = settings
-        self.graph_search_factory = GraphSearchFactory()
-        self.balance_search_factory = BalanceSearchFactory()
+        self.graph_search = GraphSearch(settings)
 
     @endpoint
     async def discovery(self, validator_version: str, validator_key: str) -> dict:
         """
-        Returns the network, version and graph database type of the miner
+        Returns the tokens, version and graph database type of the miner
         Returns:
-            dict: The network of the miner
+            dict: The tokens of the miner
             {
-                "network": "bitcoin",
+                "tokens": "PEPE",
                 "version": 1.0,
                 "graph_db": "neo4j"
             }
@@ -42,76 +41,77 @@ class Miner(Module):
             raise ValueError(f"Invalid validator version: {validator_version}, expected: {VERSION}")
 
         return {
-            "network": self.settings.NETWORK,
+            "tokens": self.settings.TOKENS,
             "version": VERSION,
             "graph_db": self.settings.GRAPH_DB_TYPE
         }
 
     @endpoint
-    async def query(self, model_kind: str, query: str, validator_key: str) -> dict:
+    async def query(self, query: str, validator_key: str) -> dict:
 
         logger.debug(f"Received challenge request from {validator_key}", validator_key=validator_key)
 
         try:
-
-            if model_kind == MODEL_KIND_FUNDS_FLOW:
-                search = GraphSearchFactory().create_graph_search(self.settings)
-                result = search.execute_query(query)
-                return result
-
-            elif model_kind == MODEL_KIND_BALANCE_TRACKING:
-                search = BalanceSearchFactory().create_balance_search(self.settings.NETWORK)
-                result = await search.execute_query(query)
-                return result
-            else:
-                raise ValueError(f"Invalid model type: {model_kind}")
+            result = self.graph_search.execute_query(query)
+            return result
         except Exception as e:
             logger.error(f"Error executing query: {e}")
             return {"error": str(e)}
 
     @endpoint
-    async def challenge(self, challenge: Challenge, validator_key: str) -> Challenge:
+    async def challenge(self, challenge: TwitterChallenge, validator_key: str) -> TwitterChallenge:
         """
-        Solves the challenge and returns the output
+        Solves the Twitter verification challenge and returns the output.
+
         Args:
-            validator_key:
+            validator_key: The key of the requesting validator.
             challenge: {
-                "model_kind": "funds_flow",
-                "in_total_amount": 0.0,
-                "out_total_amount": 0.0,
-                "tx_id_last_6_chars": "string",
-                "checksum": "string",
-                "block_height": 0
+                "token": "PEPE",
+                "tweet_id": "1851010642079096862",
+                "user_id": "3022633321",
+                "engagement_score": 254,
+                "tweet_date": "2024-11-01T12:34:56Z",
+                "follower_count": 6455,
+                "verified": False
             }
 
         Returns:
-            dict: The output of the challenge
+            TwitterChallenge with output details:
             {
-                "output": "tx_id|sum"
+                "output": {
+                    "tweet_id": "1851010642079096862",
+                    "user_id": "3022633321",
+                    "follower_count": 6455,
+                    "engagement_score": 254,
+                    "tweet_date": "2024-11-01T12:34:56Z",
+                    "verified": False
+                }
             }
-
         """
 
-        logger.debug(f"Received challenge request from {validator_key}", validator_key=validator_key)
+        logger.debug(f"Received Twitter verification challenge from {validator_key}", validator_key=validator_key)
 
-        challenge = Challenge(**challenge)
+        challenge = TwitterChallenge(**challenge)
 
-        if challenge.model_kind == MODEL_KIND_FUNDS_FLOW:
-            search = GraphSearchFactory().create_graph_search(self.settings)
-            tx_id = search.solve_challenge(
-                in_total_amount=challenge.in_total_amount,
-                out_total_amount=challenge.out_total_amount,
-                tx_id_last_6_chars=challenge.tx_id_last_6_chars
-            )
+        # Using the Twitter-specific search function to solve the challenge
+        tweet_data = self.graph_search.solve_twitter_challenge(
+            token=challenge.token,
+            tweet_id=challenge.tweet_id,
+            user_id=challenge.user_id,
+            engagement_score=challenge.engagement_score,
+            tweet_date=challenge.tweet_date,
+            follower_count=challenge.follower_count,
+            verified=challenge.verified
+        )
 
-            challenge.output = {'tx_id': tx_id}
-            return challenge
+        if tweet_data:
+            challenge.output = tweet_data
+            logger.info(f"Challenge solved successfully for tweet_id {challenge.tweet_id}")
         else:
-            search = BalanceSearchFactory().create_balance_search(self.settings.NETWORK)
-            challenge.output = {
-                'balance': await search.solve_challenge([challenge.block_height])
-            }
-            return challenge
+            challenge.output = {"error": "No matching tweet or user found for the challenge"}
+            logger.warning("No matching tweet or user found for the Twitter verification challenge")
+
+        return challenge
 
 
 if __name__ == "__main__":

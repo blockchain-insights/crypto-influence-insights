@@ -15,5 +15,4 @@ from .models.api_key import ApiKey
 from .models.challenge_funds_flow import ChallengeFundsFlow
 from .models.challenge_balance_tracking import ChallengeBalanceTracking
 
-__all__ = ["OrmBase", "get_session", "db_manager", "MinerDiscovery", "MinerReceipt", "ApiKey",
-           "ChallengeFundsFlow", "ChallengeBalanceTracking"]
+__all__ = ["OrmBase", "get_session", "db_manager", "MinerDiscovery", "MinerReceipt", "ApiKey"]

@@ -17,7 +17,7 @@ class MinerReceipt(OrmBase):
     request_id = Column(String, nullable=False)
     miner_key = Column(String, nullable=False)
     model_kind = Column(String, nullable=False)
-    network = Column(String, nullable=False)
+    tokens = Column(String, nullable=False)
     query_hash = Column(Text, nullable=False)
     accepted = Column(Boolean, nullable=False, default=False)
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)

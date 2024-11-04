@@ -19,8 +19,6 @@ from loguru import logger
 from substrateinterface import Keypair  # type: ignore
 from ._config import ValidatorSettings, load_base_weights
 
-from .database.models.challenge_balance_tracking import ChallengeBalanceTrackingManager
-from .database.models.challenge_funds_flow import ChallengeFundsFlowManager
 from .encryption import generate_hash
 from .helpers import raise_exception_if_not_registered, get_ip_port, cut_to_max_allowed_weights
 from .weights_storage import WeightsStorage
@@ -40,8 +38,6 @@ class Validator(Module):
             client: CommuneClient,
             weights_storage: WeightsStorage,
             miner_discovery_manager: MinerDiscoveryManager,
-            challenge_funds_flow_manager: ChallengeFundsFlowManager,
-            challenge_balance_tracking_manager: ChallengeBalanceTrackingManager,
             miner_receipt_manager: MinerReceiptManager,
             query_timeout: int = 60,
             challenge_timeout: int = 60,
@@ -58,8 +54,6 @@ class Validator(Module):
         self.weights_storage = weights_storage
         self.miner_discovery_manager = miner_discovery_manager
         self.terminate_event = threading.Event()
-        self.challenge_funds_flow_manager = challenge_funds_flow_manager
-        self.challenge_balance_tracking_manager = challenge_balance_tracking_manager
 
     @staticmethod
     def get_addresses(client: CommuneClient, netuid: int) -> dict[int, str]:

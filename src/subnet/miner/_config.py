@@ -21,12 +21,10 @@ class MinerSettings(BaseSettings):
     NET_UID: int
     MINER_KEY: str
     MINER_NAME: str
-    NETWORK: str
+    TOKENS: str
 
     PORT: int = 9962
     WORKERS: int = 4
-
-    DATABASE_URL: str
 
     GRAPH_DB_TYPE: str = "neo4j"
     GRAPH_DATABASE_USER: str
