@@ -196,22 +196,28 @@ class Validator(Module):
 
     @staticmethod
     def _score_miner(response: TwitterChallengeMinerResponse, receipt_miner_multiplier: float) -> float:
-
         if not response:
-            logger.debug(f"Skipping empty response")
+            logger.debug("Skipping empty response")
             return 0
 
-        failed_challenges = response.get_failed_challenges()
-        if failed_challenges > 0:
-            if failed_challenges == 2:
-                return 0
-            else:
-                return 0.15
+        failed_challenges = response.failed_challenges
 
-        score = 0.3
+        # Set scoring based on failed challenges (up to 5)
+        if failed_challenges == 5:
+            return 0  # Full failure, no score
+        elif failed_challenges == 4:
+            return 0.1  # Minimal score for significant failure
+        elif failed_challenges == 3:
+            return 0.2
+        elif failed_challenges == 2:
+            return 0.4
+        elif failed_challenges == 1:
+            return 0.7  # Close to a perfect score but with a minor failure
+        else:
+            base_score = 1.0  # Perfect score if all checks are passed
 
-        multiplier = min(1.0, receipt_miner_multiplier)
-        score = score + (0.7 * multiplier)
+        # Apply the receipt miner multiplier for the final score adjustment
+        score = base_score * min(1.0, receipt_miner_multiplier)
 
         return score
 
@@ -282,14 +288,14 @@ class Validator(Module):
         for uid, miner_info in miners_module_info.items():
             challenge_tasks.append(self._challenge_miner(miner_info))
 
-        responses: tuple[ChallengeMinerResponse] = await asyncio.gather(*challenge_tasks)
+        responses: tuple[TwitterChallengeMinerResponse] = await asyncio.gather(*challenge_tasks)
 
         for uid, miner_info, response in zip(miners_module_info.keys(), miners_module_info.values(), responses):
             if not response:
                 score_dict[uid] = 0
                 continue
 
-            if isinstance(response, ChallengeMinerResponse):
+            if isinstance(response, TwitterChallengeMinerResponse):
                 network = response.network
                 version = response.version
                 graph_db = response.graph_db
@@ -450,7 +456,7 @@ class Validator(Module):
 
     async def _query_miner(self, miner, model_kind, query):
         miner_key = miner['miner_key']
-        miner_network = miner['network']
+        miner_tokens = miner['tokens']
         module_ip = miner['miner_address']
         module_port = int(miner['miner_ip_port'])
         module_client = ModuleClient(module_ip, module_port, self.key)
@@ -458,7 +464,7 @@ class Validator(Module):
             llm_query_result = await module_client.call(
                 "query",
                 miner_key,
-                {"model_kind": model_kind, "query": query, "validator_key": self.key.ss58_address},
+                {"query": query, "validator_key": self.key.ss58_address},
                 timeout=self.query_timeout,
             )
             if not llm_query_result:

@@ -23,6 +23,3 @@ class TwitterChallengeMinerResponse(BaseModel):
     graph_db: str
     challenge_response: TwitterChallengesResponse
     failed_challenges: int
-
-    def get_failed_challenges(self, expected_output: Dict[str, Optional[str]]) -> int:
-        return self.failed_challenges
