@@ -1,5 +1,7 @@
 import signal
 from datetime import datetime
+from typing import Dict, Optional
+
 from communex._common import get_node_url
 from communex.client import CommuneClient
 from communex.module import Module, endpoint
@@ -58,6 +60,8 @@ class Miner(Module):
             logger.error(f"Error executing query: {e}")
             return {"error": str(e)}
 
+    from typing import Dict
+
     @endpoint
     async def challenge(self, challenge: TwitterChallenge, validator_key: str) -> TwitterChallenge:
         """
@@ -66,13 +70,7 @@ class Miner(Module):
         Args:
             validator_key: The key of the requesting validator.
             challenge: {
-                "token": "PEPE",
-                "tweet_id": "1851010642079096862",
-                "user_id": "3022633321",
-                "engagement_score": 254,
-                "tweet_date": "2024-11-01T12:34:56Z",
-                "follower_count": 6455,
-                "verified": False
+                "token": "PEPE"
             }
 
         Returns:
@@ -82,7 +80,6 @@ class Miner(Module):
                     "tweet_id": "1851010642079096862",
                     "user_id": "3022633321",
                     "follower_count": 6455,
-                    "engagement_score": 254,
                     "tweet_date": "2024-11-01T12:34:56Z",
                     "verified": False
                 }
@@ -91,28 +88,21 @@ class Miner(Module):
 
         logger.debug(f"Received Twitter verification challenge from {validator_key}", validator_key=validator_key)
 
-        challenge = TwitterChallenge(**challenge)
+        # Instantiate the challenge object based on the provided token
+        challenge = TwitterChallenge(**challenge.dict())
 
-        # Using the Twitter-specific search function to solve the challenge
-        tweet_data = self.graph_search.solve_twitter_challenge(
-            token=challenge.token,
-            tweet_id=challenge.tweet_id,
-            user_id=challenge.user_id,
-            engagement_score=challenge.engagement_score,
-            tweet_date=challenge.tweet_date,
-            follower_count=challenge.follower_count,
-            verified=challenge.verified
-        )
+        # Use the Twitter-specific search function to retrieve tweet data
+        tweet_data: Dict[str, Optional[str]] = self.graph_search.solve_twitter_challenge(token=challenge.token)
 
         if tweet_data:
             challenge.output = tweet_data
-            logger.info(f"Challenge solved successfully for tweet_id {challenge.tweet_id}")
+            logger.info(f"Challenge solved successfully for token {challenge.token}")
         else:
-            challenge.output = {"error": "No matching tweet or user found for the challenge"}
-            logger.warning("No matching tweet or user found for the Twitter verification challenge")
+            challenge.output = {"error": "No matching tweet or user found for the token"}
+            logger.warning(
+                f"No matching tweet or user found for the Twitter verification challenge with token {challenge.token}")
 
         return challenge
-
 
 if __name__ == "__main__":
     from communex.module.server import ModuleServer

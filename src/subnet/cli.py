@@ -17,6 +17,7 @@ from src.subnet.validator.database.session_manager import DatabaseSessionManager
 from src.subnet.validator.weights_storage import WeightsStorage
 from src.subnet.validator._config import load_environment, SettingsManager
 from src.subnet.validator.validator import Validator
+from validator.twitter import TwitterClient, TwitterService, RoundRobinBearerTokenProvider
 
 
 if __name__ == "__main__":
@@ -74,8 +75,9 @@ if __name__ == "__main__":
 
     miner_discovery_manager = MinerDiscoveryManager(session_manager)
     miner_receipt_manager = MinerReceiptManager(session_manager)
-    challenge_funds_flow_manager = ChallengeFundsFlowManager(session_manager)
-    challenge_balance_tracking_manager = ChallengeBalanceTrackingManager(session_manager)
+    twitter_round_robbin_token_provider = RoundRobinBearerTokenProvider(settings)
+    twitter_client = TwitterClient(twitter_round_robbin_token_provider)
+    twitter_service = TwitterService(twitter_client)
 
     validator = Validator(
         keypair,
@@ -83,9 +85,8 @@ if __name__ == "__main__":
         c_client,
         weights_storage,
         miner_discovery_manager,
-        challenge_funds_flow_manager,
-        challenge_balance_tracking_manager,
         miner_receipt_manager,
+        twitter_service,
         query_timeout=settings.QUERY_TIMEOUT,
         challenge_timeout=settings.CHALLENGE_TIMEOUT
     )

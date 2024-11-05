@@ -24,9 +24,9 @@ from .helpers import raise_exception_if_not_registered, get_ip_port, cut_to_max_
 from .weights_storage import WeightsStorage
 from src.subnet.validator.database.models.miner_discovery import MinerDiscoveryManager
 from src.subnet.validator.database.models.miner_receipt import MinerReceiptManager
-from src.subnet.protocol import Challenge, ChallengesResponse, ChallengeMinerResponse, Discovery, NETWORK_BITCOIN, \
-    NETWORK_COMMUNE
+from src.subnet.protocol import TwitterChallenge, TwitterChallengesResponse, TwitterChallengeMinerResponse, Discovery
 from .. import VERSION
+from .twitter import TwitterService, TwitterUser
 
 
 class Validator(Module):
@@ -39,6 +39,7 @@ class Validator(Module):
             weights_storage: WeightsStorage,
             miner_discovery_manager: MinerDiscoveryManager,
             miner_receipt_manager: MinerReceiptManager,
+            twitter_service: TwitterService,
             query_timeout: int = 60,
             challenge_timeout: int = 60,
 
@@ -53,6 +54,7 @@ class Validator(Module):
         self.query_timeout = query_timeout
         self.weights_storage = weights_storage
         self.miner_discovery_manager = miner_discovery_manager
+        self.twitter_service = twitter_service
         self.terminate_event = threading.Event()
 
     @staticmethod
@@ -87,14 +89,11 @@ class Validator(Module):
             if not challenge_response:
                 return None
 
-            return ChallengeMinerResponse(
+            return TwitterChallengeMinerResponse(
                 version=discovery.version,
                 graph_db=discovery.graph_db,
-                network=discovery.network,
-                funds_flow_challenge_actual=challenge_response.funds_flow_challenge_actual,
-                funds_flow_challenge_expected=challenge_response.funds_flow_challenge_expected,
-                balance_tracking_challenge_actual=challenge_response.balance_tracking_challenge_actual,
-                balance_tracking_challenge_expected=challenge_response.balance_tracking_challenge_expected,
+                token=discovery.token,
+                challenge_response=challenge_response,
             )
         except Exception as e:
             logger.error(f"Failed to challenge miner", error=e, miner_key=miner_key)
@@ -118,82 +117,85 @@ class Validator(Module):
             logger.info(f"Miner failed to get discovery", miner_key=miner_key, error=e)
             return None
 
-    async def _perform_challenges(self, client, miner_key, discovery) -> ChallengesResponse | None:
-
-        async def execute_funds_flow_challenge(funds_flow_challenge):
-            funds_flow_challenge_actual = "0x"
-            try:
-                funds_flow_challenge = Challenge.model_validate_json(funds_flow_challenge)
-                funds_flow_challenge = await client.call(
-                    "challenge",
-                    miner_key,
-                    {"challenge": funds_flow_challenge.model_dump(), "validator_key": self.key.ss58_address},
-                    timeout=self.challenge_timeout,
-                )
-
-                if funds_flow_challenge is not None:
-                    funds_flow_challenge = Challenge(**funds_flow_challenge)
-                    funds_flow_challenge_actual = funds_flow_challenge.output['tx_id']
-                    logger.debug(f"Funds flow challenge result", funds_flow_challenge_output=funds_flow_challenge.output, miner_key=miner_key)
-                return funds_flow_challenge_actual
-
-            except NetworkTimeoutError:
-                logger.error(f"Miner failed to perform challenges - timeout", miner_key=miner_key)
-            except Exception as e:
-                logger.error(f"Miner failed to perform challenges", error=e, miner_key=miner_key, traceback=traceback.format_exc())
-            finally:
-                return funds_flow_challenge_actual
-
-        async def execute_balance_tracking_challenge(balance_tracking_challenge):
-            balance_tracking_challenge_actual = 0
-            try:
-                balance_tracking_challenge = Challenge.model_validate_json(balance_tracking_challenge)
-                balance_tracking_challenge = await client.call(
-                    "challenge",
-                    miner_key,
-                    {"challenge": balance_tracking_challenge.model_dump(), "validator_key": self.key.ss58_address},
-                    timeout=self.challenge_timeout,
-                )
-
-                if balance_tracking_challenge is not None:
-                    balance_tracking_challenge = Challenge(**balance_tracking_challenge)
-                    balance_tracking_challenge_actual = balance_tracking_challenge.output['balance']
-                    logger.debug(f"Balance tracking challenge result", balance_tracking_challenge_output=balance_tracking_challenge.output, miner_key=miner_key)
-            except NetworkTimeoutError:
-                logger.error(f"Miner failed to perform challenges - timeout", miner_key=miner_key)
-            except Exception as e:
-                logger.error(f"Miner failed to perform challenges", error=e, miner_key=miner_key, traceback=traceback.format_exc())
-            finally:
-                return balance_tracking_challenge_actual
-
+    async def _perform_challenges(self, client, miner_key, discovery) -> Optional[TwitterChallengeMinerResponse]:
+        """
+        Executes a Twitter challenge using TwitterService to check existence of tweet and user IDs,
+        and validates verified status, follower count, and tweet creation date.
+        """
         try:
-            funds_flow_challenge, tx_id = await self.challenge_funds_flow_manager.get_random_challenge(discovery.network)
-            if funds_flow_challenge is None:
-                logger.warning(f"Failed to get funds flow challenge", miner_key=miner_key)
-                return None
-            funds_flow_challenge_actual = await execute_funds_flow_challenge(funds_flow_challenge)
-
-            balance_tracking_challenge, balance_tracking_expected_response = await self.challenge_balance_tracking_manager.get_random_challenge(discovery.network)
-            if balance_tracking_challenge is None:
-                logger.warning(f"Failed to get balance tracking challenge", miner_key=miner_key)
-                return None
-            balance_tracking_challenge_actual = await execute_balance_tracking_challenge(balance_tracking_challenge)
-
-            return ChallengesResponse(
-                funds_flow_challenge_actual=funds_flow_challenge_actual,
-                funds_flow_challenge_expected=tx_id,
-                balance_tracking_challenge_actual=balance_tracking_challenge_actual,
-                balance_tracking_challenge_expected=balance_tracking_expected_response,
+            # Call the miner's challenge endpoint to retrieve Twitter data
+            challenge_data = await client.call(
+                "challenge",
+                miner_key,
+                {"validator_key": self.key.ss58_address},
+                timeout=self.challenge_timeout,
             )
-        except NetworkTimeoutError as e:
-            logger.error(f"Miner failed to perform challenges - timeout", error=e, miner_key=miner_key)
-            return None
+
+            token = challenge_data.get("token", discovery.token)
+            output = challenge_data.get("output", {})
+
+            tweet_id = output.get("tweet_id")
+            user_id = output.get("user_id")
+            expected_verified = output.get("verified")
+            expected_follower_count = output.get("follower_count")
+            expected_tweet_date = output.get("tweet_date")
+
+            failed_challenges = 0
+            actual_data = {}
+
+            # 1. Check tweet existence and retrieve details
+            tweet_data = self.twitter_service.get_tweet_details(tweet_id) if tweet_id else None
+            if tweet_data:
+                actual_data["tweet_date"] = tweet_data.created_at
+                actual_data["tweet_id"] = tweet_id
+            else:
+                failed_challenges += 1
+                logger.warning(f"Tweet not found on Twitter for tweet_id {tweet_id}")
+
+            # 2. Check user existence and retrieve details
+            user_data = self.twitter_service.get_user_details(user_id) if user_id else None
+            if user_data:
+                actual_data["verified"] = user_data.verified
+                actual_data["follower_count"] = user_data.followers_count
+                actual_data["user_id"] = user_id
+            else:
+                failed_challenges += 1
+                logger.warning(f"User not found on Twitter for user_id {user_id}")
+
+            # 3. Validate additional fields if IDs exist
+            if tweet_data and tweet_data.created_at != expected_tweet_date:
+                failed_challenges += 1
+                logger.warning(f"Tweet date mismatch: expected {expected_tweet_date}, got {tweet_data.created_at}")
+            if user_data:
+                if user_data.verified != expected_verified:
+                    failed_challenges += 1
+                    logger.warning(f"Verified status mismatch: expected {expected_verified}, got {user_data.verified}")
+                if user_data.followers_count != expected_follower_count:
+                    failed_challenges += 1
+                    logger.warning(
+                        f"Follower count mismatch: expected {expected_follower_count}, got {user_data.followers_count}")
+
+            # Construct TwitterChallengesResponse
+            challenge_response = TwitterChallengesResponse(
+                token=token,
+                output=actual_data
+            )
+
+            # Return with failed challenge count
+            return TwitterChallengeMinerResponse(
+                token=token,
+                version=discovery.version,
+                graph_db=discovery.graph_db,
+                challenge_response=challenge_response,
+                failed_challenges=failed_challenges
+            )
+
         except Exception as e:
-            logger.error(f"Miner failed to perform challenges", error=e, miner_key=miner_key, traceback=traceback.format_exc())
+            logger.error(f"Failed to perform Twitter challenge", error=e, miner_key=miner_key)
             return None
 
     @staticmethod
-    def _score_miner(response: ChallengeMinerResponse, receipt_miner_multiplier: float) -> float:
+    def _score_miner(response: TwitterChallengeMinerResponse, receipt_miner_multiplier: float) -> float:
 
         if not response:
             logger.debug(f"Skipping empty response")
