@@ -16,8 +16,7 @@ class MinerReceipt(OrmBase):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     request_id = Column(String, nullable=False)
     miner_key = Column(String, nullable=False)
-    model_kind = Column(String, nullable=False)
-    tokens = Column(String, nullable=False)
+    token = Column(String, nullable=False)
     query_hash = Column(Text, nullable=False)
     accepted = Column(Boolean, nullable=False, default=False)
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -36,15 +35,14 @@ class MinerReceiptManager:
     def __init__(self, session_manager: DatabaseSessionManager):
         self.session_manager = session_manager
 
-    async def store_miner_receipt(self, request_id: str, miner_key: str, model_kind: str, network: str, query_hash: str, timestamp: datetime):
+    async def store_miner_receipt(self, request_id: str, miner_key: str, token: str, query_hash: str, timestamp: datetime):
         async with self.session_manager.session() as session:
             async with session.begin():
                 stmt = insert(MinerReceipt).values(
                     request_id=request_id,
                     miner_key=miner_key,
-                    model_kind=model_kind,
                     query_hash=query_hash,
-                    network=network,
+                    token=token,
                     accepted=False,
                     timestamp=timestamp
                 )
@@ -91,7 +89,7 @@ class MinerReceiptManager:
                 "total_items": total_items
             }
 
-    async def get_receipt_miner_rank(self, network: str) -> List[ReceiptMinerRank]:
+    async def get_receipt_miner_rank(self, token: str) -> List[ReceiptMinerRank]:
         async with self.session_manager.session() as session:
             query = text("""
                             WITH miner_ratios AS (
@@ -107,7 +105,7 @@ class MinerReceiptManager:
                                 FROM 
                                     miner_receipts
                                 WHERE 
-                                    timestamp >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND network = :network
+                                    timestamp >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND token = :token
                                 GROUP BY 
                                     miner_key
                             )
@@ -119,7 +117,7 @@ class MinerReceiptManager:
                                 miner_ratios
                         """)
 
-            result = await session.execute(query, {"network": network}).fetchone()
+            result = await session.execute(query, {"token": token}).fetchone()
             result = [ReceiptMinerRank(miner_ratio=row['ratio'], miner_rank=row['rank']) for row in result]
 
             return result
@@ -128,49 +126,49 @@ class MinerReceiptManager:
         async with self.session_manager.session() as session:
             query = text("""
                 SELECT 
-                    network,
+                    token,
                     COUNT(*) AS count
                 FROM 
                     miner_receipts
                 WHERE 
                     timestamp >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
                 GROUP BY 
-                    network
+                    token
             """)
 
             result = await session.execute(query)
             result = result.fetchall()
             return {row[0]: row[1] for row in result}
 
-    async def get_receipt_miner_multiplier(self, network: Optional[str] = None, miner_key: Optional[str] = None) -> List[Dict]:
+    async def get_receipt_miner_multiplier(self, token: Optional[str] = None, miner_key: Optional[str] = None) -> List[Dict]:
         async with self.session_manager.session() as session:
             miner_key_filter = "AND miner_receipts.miner_key = :miner_key" if miner_key else ""
-            network_filter = "AND miner_receipts.network = :network" if network else ""
+            token_filter = "AND miner_receipts.token = :token" if token else ""
 
             query = text(f"""
                 WITH total_receipts AS (
-                    SELECT network, COUNT(*) AS total_count
+                    SELECT token, COUNT(*) AS total_count
                     FROM miner_receipts
                     WHERE timestamp >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-                    GROUP BY network
+                    GROUP BY token
                 ),
                 miner_accepted_counts AS (
                     SELECT 
                         miner_key,
-                        network,
+                        token,
                         COUNT(CASE WHEN accepted = True THEN 1 END) AS accepted_true_count
                     FROM 
                         miner_receipts
                     WHERE 
                         timestamp >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
                         {miner_key_filter}
-                        {network_filter}
+                        {token_filter}
                     GROUP BY 
-                        miner_key, network
+                        miner_key, token
                 )
                 SELECT 
                     mac.miner_key,
-                    mac.network,
+                    mac.token,
                     CASE 
                         WHEN tr.total_count = 0 THEN 0
                         ELSE POWER(mac.accepted_true_count::float / tr.total_count, 2)
@@ -185,8 +183,8 @@ class MinerReceiptManager:
             params = {}
             if miner_key:
                 params['miner_key'] = miner_key
-            if network:
-                params['network'] = network
+            if token:
+                params['token'] = token
 
             result = await session.execute(query, params)
             result = result.fetchall()

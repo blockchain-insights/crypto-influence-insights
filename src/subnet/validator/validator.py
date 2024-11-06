@@ -296,7 +296,7 @@ class Validator(Module):
                 continue
 
             if isinstance(response, TwitterChallengeMinerResponse):
-                network = response.network
+                token = response.token
                 version = response.version
                 graph_db = response.graph_db
                 connection, miner_metadata = miner_info
@@ -307,7 +307,7 @@ class Validator(Module):
                 adjusted_weights = self.adjust_network_weights_with_min_threshold(organic_usage, min_threshold_ratio=5)
                 logger.debug(f"Adjusted weights", adjusted_weights=adjusted_weights, miner_key=miner_key)
 
-                receipt_miner_multiplier_result = await self.miner_receipt_manager.get_receipt_miner_multiplier(network, miner_key)
+                receipt_miner_multiplier_result = await self.miner_receipt_manager.get_receipt_miner_multiplier(token, miner_key)
                 if not receipt_miner_multiplier_result:
                     receipt_miner_multiplier = 1
                 else:
@@ -324,7 +324,7 @@ class Validator(Module):
                 assert weighted_score <= 1
                 score_dict[uid] = weighted_score
 
-                await self.miner_discovery_manager.store_miner_metadata(uid, miner_key, miner_address, miner_ip_port, network, version, graph_db)
+                await self.miner_discovery_manager.store_miner_metadata(uid, miner_key, miner_address, miner_ip_port, token, version, graph_db)
                 await self.miner_discovery_manager.update_miner_challenges(miner_key, response.get_failed_challenges(), 2)
 
         if not score_dict:
@@ -390,39 +390,37 @@ class Validator(Module):
                     logger.info("Terminating validation loop")
                     break
 
-    async def query_miner(self, network: str, model_kind: str, query, miner_key: Optional[str]) -> dict:
+    async def query_miner(self, token: str, query, miner_key: Optional[str]) -> dict:
         request_id = str(uuid.uuid4())
         timestamp = datetime.utcnow()
         query_hash = generate_hash(query)
 
         if miner_key:
-            miner = await self.miner_discovery_manager.get_miner_by_key(miner_key, network)
+            miner = await self.miner_discovery_manager.get_miner_by_key(miner_key, token)
             if not miner:
                 return {
                     "request_id": request_id,
                     "timestamp": timestamp,
                     "miner_keys": None,
                     "query_hash": query_hash,
-                    "model_kind": model_kind,
                     "query": query,
                     "response": []}
 
-            response = await self._query_miner(miner, model_kind, query)
-            await self.miner_receipt_manager.store_miner_receipt(request_id, miner_key, model_kind, network, query_hash, timestamp)
+            response = await self._query_miner(miner, query)
+            await self.miner_receipt_manager.store_miner_receipt(request_id, miner_key, token, query_hash, timestamp)
 
             return {
                 "request_id": request_id,
                 "timestamp": timestamp,
                 "miner_keys": [miner_key],
                 "query_hash": query_hash,
-                "model_kind": model_kind,
                 "query": query,
                 "response": response
             }
         else:
             select_count = 3
             sample_size = 16
-            miners = await self.miner_discovery_manager.get_miners_by_network(network)
+            miners = await self.miner_discovery_manager.get_miners_by_token(token)
 
             if len(miners) < 3:
                 top_miners = miners
@@ -431,7 +429,7 @@ class Validator(Module):
 
             query_tasks = []
             for miner in top_miners:
-                query_tasks.append(self._query_miner(miner,  model_kind, query))
+                query_tasks.append(self._query_miner(miner, query))
 
             responses = await asyncio.gather(*query_tasks)
 
@@ -439,7 +437,7 @@ class Validator(Module):
 
             for miner, response in combined_responses:
                 if response:
-                    await self.miner_receipt_manager.store_miner_receipt(request_id, miner['miner_key'], model_kind, network, query_hash, timestamp)
+                    await self.miner_receipt_manager.store_miner_receipt(request_id, miner['miner_key'], tokens, query_hash, timestamp)
 
             miner, random_response = random.choice(combined_responses)
             await self.miner_receipt_manager.accept_miner_receipt(request_id, miner['miner_key'])
@@ -449,12 +447,11 @@ class Validator(Module):
                 "timestamp": timestamp,
                 "miner_keys": [miner['miner_key'] for miner in top_miners],
                 "query_hash": query_hash,
-                "model_kind": model_kind,
                 "query": query,
                 "response": random_response
             }
 
-    async def _query_miner(self, miner, model_kind, query):
+    async def _query_miner(self, miner, query):
         miner_key = miner['miner_key']
         miner_tokens = miner['tokens']
         module_ip = miner['miner_address']

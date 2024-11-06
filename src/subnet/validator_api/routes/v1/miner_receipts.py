@@ -16,7 +16,7 @@ class MinerMetadataRequest(BaseModel):
 async def get_metadata(network: Optional[str] = None,
                              validator: Validator = Depends(get_validator),
                              api_key: str = Depends(api_key_auth)):
-    results = await validator.miner_discovery_manager.get_miners_by_network(network)
+    results = await validator.miner_discovery_manager.get_miners_by_tokens(network)
     return results
 
 
@@ -37,8 +37,8 @@ async def get_receipt_multiplier(miner_key: Optional[str] = None, network: Optio
 
 
 @miner_router.get("/miner/ranks")
-async def get_ranks(network: Optional[str] = None,
+async def get_ranks(tokens: Optional[str] = None,
                           validator: Validator = Depends(get_validator),
                           api_key: str = Depends(api_key_auth)):
-    results = await validator.miner_discovery_manager.get_miners_for_leader_board(network)
+    results = await validator.miner_discovery_manager.get_miners_for_leader_board(tokens)
     return results
