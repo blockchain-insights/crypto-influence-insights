@@ -8,9 +8,6 @@ from communex.compat.key import classic_load_key
 from loguru import logger
 from substrateinterface import Keypair
 
-from src.subnet.validator.challenges.generator_thread import ChallengeGeneratorThread
-from src.subnet.validator.database.models.challenge_balance_tracking import ChallengeBalanceTrackingManager
-from src.subnet.validator.database.models.challenge_funds_flow import ChallengeFundsFlowManager
 from src.subnet.validator.database.models.miner_discovery import MinerDiscoveryManager
 from src.subnet.validator.database.models.miner_receipt import MinerReceiptManager
 from src.subnet.validator.database.session_manager import DatabaseSessionManager, run_migrations
@@ -102,19 +99,10 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
-    challenge_generator_thread = ChallengeGeneratorThread(
-        settings=settings,
-        environment=environment,
-        frequency=settings.CHALLENGE_FREQUENCY,
-        threshold=settings.CHALLENGE_THRESHOLD,
-        terminate_event=validator.terminate_event)
-    challenge_generator_thread.start()
-
     try:
         asyncio.run(validator.validation_loop(settings))
     except KeyboardInterrupt:
         logger.info("Validator loop interrupted")
 
-    challenge_generator_thread.join()
     logger.info(f"Challenge generator stopped successfully.")
 

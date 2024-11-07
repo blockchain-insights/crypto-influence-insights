@@ -43,6 +43,8 @@ class ValidatorSettings(BaseSettings):
     VALIDATOR_KEY: Optional[str] = None
     VALIDATOR_PRIVATE_KEY: Optional[str] = None
 
+    TWITTER_BEARER_TOKENS: str
+
     PORT: int = 9900
     WORKERS: int = 4
 
@@ -53,13 +55,6 @@ class ValidatorSettings(BaseSettings):
 
     QUERY_TIMEOUT: int   # cross check query timeout
     CHALLENGE_TIMEOUT: int  # challenge and llm challenge time
-
-    CHALLENGE_FREQUENCY: int
-    CHALLENGE_THRESHOLD: int
-
-    BITCOIN_NODE_RPC_URL: str
-    COMMUNE_NODE_RPC: str
-
 
     model_config = ConfigDict(
         extra='ignore',

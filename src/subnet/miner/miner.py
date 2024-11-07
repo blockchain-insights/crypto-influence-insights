@@ -12,8 +12,7 @@ from starlette.middleware.cors import CORSMiddleware
 from src.subnet import VERSION
 from src.subnet.miner._config import MinerSettings, load_environment
 from src.subnet.miner import GraphSearch
-from src.subnet.protocol import TwitterChallenge, MODEL_KIND_FUNDS_FLOW, MODEL_KIND_BALANCE_TRACKING
-from src.subnet.validator.database import db_manager
+from src.subnet.protocol import TwitterChallenge
 
 
 class Miner(Module):
@@ -89,7 +88,7 @@ class Miner(Module):
         logger.debug(f"Received Twitter verification challenge from {validator_key}", validator_key=validator_key)
 
         # Instantiate the challenge object based on the provided token
-        challenge = TwitterChallenge(**challenge.dict())
+        challenge = TwitterChallenge(**challenge)
 
         # Use the Twitter-specific search function to retrieve tweet data
         tweet_data: Dict[str, Optional[str]] = self.graph_search.solve_twitter_challenge(token=challenge.token)
@@ -154,7 +153,6 @@ if __name__ == "__main__":
         time_func=time.time,
     )
     limiter = IpLimiterParams()
-    db_manager.init(settings.DATABASE_URL)
 
     server = ModuleServer(miner,
                           keypair,

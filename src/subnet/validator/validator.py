@@ -124,10 +124,11 @@ class Validator(Module):
         """
         try:
             # Call the miner's challenge endpoint to retrieve Twitter data
+            challenge = TwitterChallenge(token=discovery.token)
             challenge_data = await client.call(
                 "challenge",
                 miner_key,
-                {"validator_key": self.key.ss58_address},
+                {"challenge": challenge.model_dump(), "validator_key": self.key.ss58_address},
                 timeout=self.challenge_timeout,
             )
 

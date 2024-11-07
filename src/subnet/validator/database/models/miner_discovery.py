@@ -75,21 +75,19 @@ class MinerDiscoveryManager:
             miners = [to_dict(miner) for miner in result.scalars().all()]
             return miners
 
-    async def update_miner_rank(self, miner_key: str, new_rank: float, token: str):
+    async def update_miner_rank(self, miner_key: str, new_rank: float):
         async with self.session_manager.session() as session:
             async with session.begin():
                 stmt = update(MinerDiscovery).where(
-                    MinerDiscovery.miner_key == miner_key,
-                    MinerDiscovery.token == token
+                    MinerDiscovery.miner_key == miner_key
                 ).values(rank=new_rank)
                 await session.execute(stmt)
 
-    async def update_miner_challenges(self, miner_key: str, failed_challenges_inc: int, total_challenges_inc: int, token: str):
+    async def update_miner_challenges(self, miner_key: str, failed_challenges_inc: int, total_challenges_inc: int = 2):
         async with self.session_manager.session() as session:
             async with session.begin():
                 stmt = update(MinerDiscovery).where(
-                    MinerDiscovery.miner_key == miner_key,
-                    MinerDiscovery.token == token
+                    MinerDiscovery.miner_key == miner_key
                 ).values(
                     failed_challenges=MinerDiscovery.failed_challenges + failed_challenges_inc,
                     total_challenges=MinerDiscovery.total_challenges + total_challenges_inc
@@ -101,41 +99,108 @@ class MinerDiscoveryManager:
             async with session.begin():
                 await session.execute(delete(MinerDiscovery))
 
-    async def remove_miner_by_key(self, miner_key: str, token: str):
+    async def remove_miner_by_key(self, miner_key: str):
         async with self.session_manager.session() as session:
             async with session.begin():
                 await session.execute(
-                    delete(MinerDiscovery).where(MinerDiscovery.miner_key == miner_key, MinerDiscovery.token == token)
+                    delete(MinerDiscovery).where(MinerDiscovery.miner_key == miner_key)
                 )
 
     async def get_miners_for_leader_board(self, token: Optional[str] = None):
         async with self.session_manager.session() as session:
-            query_params = {"token": token} if token else {}
-            result = await session.execute(text(raw_sql), query_params)
-            miners = [dict(row._mapping) for row in result.fetchall()]
-            return miners
+            if not token:
+                # Raw SQL query without token filter using LEFT JOIN
+                raw_sql = """
+                SELECT 
+                    md.token,
+                    md.miner_key,
+                    CAST(md.timestamp AS VARCHAR) AS timestamp,
+                    md.rank,
+                    COALESCE(COUNT(mr.id), 0) AS total_receipts,
+                    COALESCE(SUM(CASE WHEN mr.accepted THEN 1 ELSE 0 END), 0) AS accepted_receipts
+                FROM 
+                    miner_discoveries AS md
+                LEFT JOIN 
+                    miner_receipts AS mr ON md.miner_key = mr.miner_key
+                GROUP BY 
+                    md.token, 
+                    md.miner_key, 
+                    md.timestamp, 
+                    md.rank
+                ORDER BY 
+                    md.timestamp DESC, 
+                    md.rank DESC;
+                """
+            else:
+                # Raw SQL query with token filter using LEFT JOIN
+                raw_sql = """
+                SELECT 
+                    md.id,
+                    md.token,
+                    CAST(md.timestamp AS VARCHAR) AS timestamp,
+                    md.rank,
+                    COALESCE(COUNT(mr.id), 0) AS total_receipts,
+                    COALESCE(SUM(CASE WHEN mr.accepted THEN 1 ELSE 0 END), 0) AS accepted_receipts
+                FROM 
+                    miner_discoveries AS md
+                LEFT JOIN 
+                    miner_receipts AS mr ON md.miner_key = mr.miner_key
+                WHERE 
+                    md.token = :token
+                GROUP BY 
+                    md.id,
+                    md.token, 
+                    md.timestamp, 
+                    md.rank
+                ORDER BY 
+                    md.timestamp DESC, 
+                    md.rank DESC;
+                """
 
-    async def get_miners_for_cross_check(self, token: str):
+            # Execute raw SQL query
+            result = await session.execute(text(raw_sql), {"token": token} if token else {})
+            # Use row._mapping to convert each row to a dictionary
+            miners = [dict(row._mapping) for row in result.fetchall()]
+
+            if not token:
+                tokens = set(miner['token'] for miner in miners)
+                return [
+                    {
+                        "token": token,
+                        "data": [miner for miner in miners if miner['token'] == token]
+                    }
+                    for token in tokens
+                ]
+            else:
+                return {"token": token, "data": miners}
+
+    async def get_miners_for_cross_check(self, token):
         async with self.session_manager.session() as session:
             total_miners_result = await session.execute(
                 select(func.count(MinerDiscovery.id)).where(MinerDiscovery.token == token)
             )
+
             total_miners = total_miners_result.scalar()
             limit = int(0.64 * total_miners)
 
             result = await session.execute(
                 select(MinerDiscovery,
-                       ((MinerDiscovery.total_challenges - MinerDiscovery.failed_challenges) / MinerDiscovery.total_challenges).label('success_ratio'))
+                       ((
+                                    MinerDiscovery.total_challenges - MinerDiscovery.failed_challenges) / MinerDiscovery.total_challenges).label(
+                           'success_ratio'))
                 .where(MinerDiscovery.token == token, MinerDiscovery.rank > 0.9)
                 .order_by('success_ratio', MinerDiscovery.rank.desc())
                 .limit(limit)
             )
 
             miners = [to_dict(row.MinerDiscovery) for row in result.fetchall()]
-            selected_miners = random.sample(miners, int(0.64 * len(miners)))
+            sample_size = int(0.64 * len(miners))
+            selected_miners = random.sample(miners, sample_size)
 
+            # fetch trusted miners for given token and merge results with selected miners
             trusted_miners_result = await session.execute(
-                select(MinerDiscovery).where(MinerDiscovery.token == token, MinerDiscovery.is_trusted == 1)
+                select(MinerDiscovery)
+                .where(MinerDiscovery.token == token, MinerDiscovery.is_trusted == 1)
             )
             trusted_miners = [to_dict(row.MinerDiscovery) for row in trusted_miners_result.fetchall()]
 
