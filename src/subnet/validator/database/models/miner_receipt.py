@@ -122,7 +122,7 @@ class MinerReceiptManager:
 
             return result
 
-    async def get_receipts_count_by_networks(self) -> dict:
+    async def get_receipts_count_by_tokens(self) -> dict:
         async with self.session_manager.session() as session:
             query = text("""
                 SELECT 

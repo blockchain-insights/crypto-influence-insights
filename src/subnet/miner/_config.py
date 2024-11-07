@@ -21,7 +21,7 @@ class MinerSettings(BaseSettings):
     NET_UID: int
     MINER_KEY: str
     MINER_NAME: str
-    TOKENS: str
+    TOKEN: str
 
     PORT: int = 9962
     WORKERS: int = 4

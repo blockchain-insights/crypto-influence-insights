@@ -26,11 +26,11 @@ class Miner(Module):
     @endpoint
     async def discovery(self, validator_version: str, validator_key: str) -> dict:
         """
-        Returns the tokens, version and graph database type of the miner
+        Returns the token, version and graph database type of the miner
         Returns:
             dict: The tokens of the miner
             {
-                "tokens": "PEPE",
+                "token": "PEPE",
                 "version": 1.0,
                 "graph_db": "neo4j"
             }
@@ -43,7 +43,7 @@ class Miner(Module):
             raise ValueError(f"Invalid validator version: {validator_version}, expected: {VERSION}")
 
         return {
-            "tokens": self.settings.TOKENS,
+            "token": self.settings.TOKEN,
             "version": VERSION,
             "graph_db": self.settings.GRAPH_DB_TYPE
         }

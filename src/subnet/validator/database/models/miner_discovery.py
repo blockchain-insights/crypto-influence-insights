@@ -1,10 +1,9 @@
 import random
-from typing import Optional, List
-from sqlalchemy import Column, Integer, String, Float, DateTime, update, insert, func, text
+from typing import Optional
+from sqlalchemy import Column, Integer, String, Float, DateTime, update, insert, func, text, delete
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.future import select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import delete
 from datetime import datetime
 
 from src.subnet.validator.database import OrmBase
@@ -33,32 +32,30 @@ class MinerDiscoveryManager:
     def __init__(self, session_manager: DatabaseSessionManager):
         self.session_manager = session_manager
 
-    async def store_miner_metadata(self, uid: int, miner_key: str, miner_address: str, miner_ip_port: str, tokens: str, version: float, graph_db: str):
-        token_list = tokens.split(',')
+    async def store_miner_metadata(self, uid: int, miner_key: str, miner_address: str, miner_ip_port: str, token: str, version: float, graph_db: str):
         async with self.session_manager.session() as session:
             async with session.begin():
-                for token in token_list:
-                    stmt = insert(MinerDiscovery).values(
-                        uid=uid,
-                        miner_key=miner_key,
-                        token=token,
-                        miner_address=miner_address,
-                        miner_ip_port=miner_ip_port,
-                        timestamp=datetime.utcnow(),
-                        version=version,
-                        graph_db=graph_db
-                    ).on_conflict_do_update(
-                        index_elements=['miner_key', 'token'],
-                        set_={
-                            'uid': uid,
-                            'miner_address': miner_address,
-                            'miner_ip_port': miner_ip_port,
-                            'version': version,
-                            'graph_db': graph_db,
-                            'timestamp': datetime.utcnow()
-                        }
-                    )
-                    await session.execute(stmt)
+                stmt = insert(MinerDiscovery).values(
+                    uid=uid,
+                    miner_key=miner_key,
+                    token=token,
+                    miner_address=miner_address,
+                    miner_ip_port=miner_ip_port,
+                    timestamp=datetime.utcnow(),
+                    version=version,
+                    graph_db=graph_db
+                ).on_conflict_do_update(
+                    index_elements=['miner_key', 'token'],
+                    set_={
+                        'uid': uid,
+                        'miner_address': miner_address,
+                        'miner_ip_port': miner_ip_port,
+                        'version': version,
+                        'graph_db': graph_db,
+                        'timestamp': datetime.utcnow()
+                    }
+                )
+                await session.execute(stmt)
 
     async def get_miner_by_key(self, miner_key: str, token: str):
         async with self.session_manager.session() as session:
@@ -68,22 +65,15 @@ class MinerDiscoveryManager:
             miner = result.scalars().first()
             return to_dict(miner) if miner else None
 
-    async def get_miners_by_token(self, token: Optional[str]):
+    async def get_miners_by_token(self, token: str):
         async with self.session_manager.session() as session:
-            if token:
-                result = await session.execute(
-                    select(MinerDiscovery)
-                    .where(MinerDiscovery.token == token)
-                    .order_by(MinerDiscovery.timestamp, MinerDiscovery.rank)
-                )
-                miners = [to_dict(miner) for miner in result.scalars().all()]
-                return miners
-            else:
-                result = await session.execute(
-                    select(MinerDiscovery)
-                    .order_by(MinerDiscovery.timestamp, MinerDiscovery.rank)
-                )
-                return [to_dict(miner) for miner in result.scalars().all()]
+            result = await session.execute(
+                select(MinerDiscovery)
+                .where(MinerDiscovery.token == token)
+                .order_by(MinerDiscovery.timestamp, MinerDiscovery.rank)
+            )
+            miners = [to_dict(miner) for miner in result.scalars().all()]
+            return miners
 
     async def update_miner_rank(self, miner_key: str, new_rank: float, token: str):
         async with self.session_manager.session() as session:
@@ -94,8 +84,7 @@ class MinerDiscoveryManager:
                 ).values(rank=new_rank)
                 await session.execute(stmt)
 
-    async def update_miner_challenges(self, miner_key: str, failed_challenges_inc: int, total_challenges_inc: int,
-                                      token: str):
+    async def update_miner_challenges(self, miner_key: str, failed_challenges_inc: int, total_challenges_inc: int, token: str):
         async with self.session_manager.session() as session:
             async with session.begin():
                 stmt = update(MinerDiscovery).where(
@@ -121,13 +110,10 @@ class MinerDiscoveryManager:
 
     async def get_miners_for_leader_board(self, token: Optional[str] = None):
         async with self.session_manager.session() as session:
-            if token:
-                result = await session.execute(text(raw_sql), {"token": token})
-                miners = [dict(row._mapping) for row in result.fetchall()]
-                return miners
-            else:
-                result = await session.execute(text(raw_sql))
-                return [dict(row._mapping) for row in result.fetchall()]
+            query_params = {"token": token} if token else {}
+            result = await session.execute(text(raw_sql), query_params)
+            miners = [dict(row._mapping) for row in result.fetchall()]
+            return miners
 
     async def get_miners_for_cross_check(self, token: str):
         async with self.session_manager.session() as session:
@@ -139,9 +125,7 @@ class MinerDiscoveryManager:
 
             result = await session.execute(
                 select(MinerDiscovery,
-                       ((
-                                    MinerDiscovery.total_challenges - MinerDiscovery.failed_challenges) / MinerDiscovery.total_challenges).label(
-                           'success_ratio'))
+                       ((MinerDiscovery.total_challenges - MinerDiscovery.failed_challenges) / MinerDiscovery.total_challenges).label('success_ratio'))
                 .where(MinerDiscovery.token == token, MinerDiscovery.rank > 0.9)
                 .order_by('success_ratio', MinerDiscovery.rank.desc())
                 .limit(limit)
