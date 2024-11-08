@@ -1,8 +1,8 @@
-"""Main miner tables
+"""Miner discovery and receipt tables
 
 Revision ID: 001
 Revises: 
-Create Date: 2024-11-07 19:40:45.933439
+Create Date: 2024-11-08 18:57:55.953664
 
 """
 from typing import Sequence, Union
@@ -34,7 +34,8 @@ def upgrade() -> None:
     sa.Column('is_trusted', sa.Integer(), nullable=False),
     sa.Column('version', sa.Float(), nullable=False),
     sa.Column('graph_db', sa.String(), nullable=False),
-    sa.PrimaryKeyConstraint('id', name=op.f('pk__miner_discoveries'))
+    sa.PrimaryKeyConstraint('id', name=op.f('pk__miner_discoveries')),
+    sa.UniqueConstraint('miner_key', name=op.f('uq__miner_discoveries__miner_key'))
     )
     op.create_table('miner_receipts',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),

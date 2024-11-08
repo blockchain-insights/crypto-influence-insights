@@ -78,26 +78,30 @@ class GraphSearch:
         start_time = time.time()
         try:
             with self.driver.session() as session:
-                # Define the query to match the token and retrieve associated tweet data
-                query = """
-                    MATCH (t:Tweet)-[:POSTED_BY]->(u:UserAccount)
-                    WHERE t.token = $token
-                    RETURN t.tweet_id AS tweet_id, u.user_id AS user_id, 
-                           t.timestamp AS tweet_date, u.follower_count AS follower_count, 
-                           u.verified AS verified
+                # Execute the Cypher query to find the latest tweet for the token
+                query = f"""
+                    MATCH (u:UserAccount)-[:MENTIONS]->(token:Token {{name: "{token}"}})
+                    MATCH (token)-[:MENTIONED_IN]->(t:Tweet)
+                    MATCH (u)-[:POSTED]->(t)
+                    RETURN 
+                        t.id AS tweet_id, 
+                        u.user_id AS user_id, 
+                        t.timestamp AS tweet_date, 
+                        u.follower_count AS follower_count, 
+                        u.is_verified AS verified
                     ORDER BY t.timestamp DESC
-                    LIMIT 1;
+                    LIMIT 1
                 """
-                params = {'token': token}
 
-                # Run query with parameters
-                result = session.run(query, **params)
+                # Run query without additional parameters, as token is embedded directly in the query string
+                result = session.run(query)
                 single_result = result.single()
 
                 if not single_result:
+                    logger.warning(f"No tweet found for token {token}")
                     return None
 
-                # Structure result in a dictionary to match TwitterChallenge output format
+                # Structure result in a dictionary to match the TwitterChallenge output format
                 return {
                     "tweet_id": single_result["tweet_id"],
                     "user_id": single_result["user_id"],

@@ -176,7 +176,7 @@ class MinerReceiptManager:
                 FROM 
                     miner_accepted_counts mac
                 JOIN
-                    total_receipts tr ON mac.network = tr.network
+                    total_receipts tr ON mac.token = tr.token
                 ORDER BY multiplier DESC;
             """)
 
@@ -189,4 +189,4 @@ class MinerReceiptManager:
             result = await session.execute(query, params)
             result = result.fetchall()
 
-            return [{ 'miner_key': row[0], 'network': row[1], 'multiplier': row[2]} for row in result]
+            return [{ 'miner_key': row[0], 'token': row[1], 'multiplier': row[2]} for row in result]

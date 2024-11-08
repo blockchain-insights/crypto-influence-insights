@@ -5,7 +5,7 @@ import threading
 import time
 import traceback
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from random import sample
 from typing import cast, Dict, Optional
 
@@ -24,6 +24,8 @@ from .helpers import raise_exception_if_not_registered, get_ip_port, cut_to_max_
 from .weights_storage import WeightsStorage
 from src.subnet.validator.database.models.miner_discovery import MinerDiscoveryManager
 from src.subnet.validator.database.models.miner_receipt import MinerReceiptManager
+from src.subnet.validator.database.models.tweet_cache import TweetCacheManager
+from src.subnet.validator.database.models.user_cache import UserCacheManager
 from src.subnet.protocol import TwitterChallenge, TwitterChallengesResponse, TwitterChallengeMinerResponse, Discovery
 from .. import VERSION
 from .twitter import TwitterService, TwitterUser
@@ -39,6 +41,8 @@ class Validator(Module):
             weights_storage: WeightsStorage,
             miner_discovery_manager: MinerDiscoveryManager,
             miner_receipt_manager: MinerReceiptManager,
+            tweet_cache_manager: TweetCacheManager,
+            user_cache_manager: UserCacheManager,
             twitter_service: TwitterService,
             query_timeout: int = 60,
             challenge_timeout: int = 60,
@@ -54,6 +58,8 @@ class Validator(Module):
         self.query_timeout = query_timeout
         self.weights_storage = weights_storage
         self.miner_discovery_manager = miner_discovery_manager
+        self.tweet_cache_manager = tweet_cache_manager
+        self.user_cache_manager = user_cache_manager
         self.twitter_service = twitter_service
         self.terminate_event = threading.Event()
 
@@ -89,12 +95,7 @@ class Validator(Module):
             if not challenge_response:
                 return None
 
-            return TwitterChallengeMinerResponse(
-                version=discovery.version,
-                graph_db=discovery.graph_db,
-                token=discovery.token,
-                challenge_response=challenge_response,
-            )
+            return challenge_response
         except Exception as e:
             logger.error(f"Failed to challenge miner", error=e, miner_key=miner_key)
             return None
@@ -117,10 +118,12 @@ class Validator(Module):
             logger.info(f"Miner failed to get discovery", miner_key=miner_key, error=e)
             return None
 
+    from datetime import datetime
+
     async def _perform_challenges(self, client, miner_key, discovery) -> Optional[TwitterChallengeMinerResponse]:
         """
         Executes a Twitter challenge using TwitterService to check existence of tweet and user IDs,
-        and validates verified status, follower count, and tweet creation date.
+        and validates user_id, tweet_id, and tweet creation date. Utilizes cache where available.
         """
         try:
             # Call the miner's challenge endpoint to retrieve Twitter data
@@ -137,44 +140,70 @@ class Validator(Module):
 
             tweet_id = output.get("tweet_id")
             user_id = output.get("user_id")
-            expected_verified = output.get("verified")
-            expected_follower_count = output.get("follower_count")
             expected_tweet_date = output.get("tweet_date")
 
             failed_challenges = 0
             actual_data = {}
 
-            # 1. Check tweet existence and retrieve details
-            tweet_data = self.twitter_service.get_tweet_details(tweet_id) if tweet_id else None
+            # Check if tweet data is in cache; if not, fetch from API and store in cache
+            tweet_data = await self.tweet_cache_manager.get_tweet_cache(tweet_id)
             if tweet_data:
-                actual_data["tweet_date"] = tweet_data.created_at
+                logger.info(f"Tweet data retrieved from cache for tweet_id {tweet_id}")
+                actual_data["tweet_date"] = tweet_data["tweet_date"]
                 actual_data["tweet_id"] = tweet_id
             else:
-                failed_challenges += 1
-                logger.warning(f"Tweet not found on Twitter for tweet_id {tweet_id}")
+                tweet_data = self.twitter_service.get_tweet_details(tweet_id) if tweet_id else None
+                if tweet_data:
+                    # Ensure tweet date is a string for consistent output
+                    actual_data["tweet_date"] = tweet_data.created_at if isinstance(tweet_data.created_at, str) else tweet_data.created_at.isoformat()
+                    actual_data["tweet_id"] = tweet_id
 
-            # 2. Check user existence and retrieve details
-            user_data = self.twitter_service.get_user_details(user_id) if user_id else None
+                    # Store tweet data in cache
+                    tweet_date = tweet_data.created_at
+                    if isinstance(tweet_date, str):
+                        # Convert to a timezone-aware datetime
+                        tweet_date = datetime.fromisoformat(tweet_date.replace("Z", "+00:00"))
+
+                    # Ensure tweet_date is UTC and offset-naive
+                    tweet_date = tweet_date.astimezone(timezone.utc).replace(tzinfo=None)
+
+                    await self.tweet_cache_manager.store_tweet_cache(tweet_id=tweet_id, tweet_date=tweet_date)
+                else:
+                    failed_challenges += 1
+                    logger.warning(f"Tweet not found on Twitter for tweet_id {tweet_id}")
+
+            # Validate tweet date
+            if "tweet_date" in actual_data:
+                try:
+                    expected_date = datetime.fromisoformat(expected_tweet_date.replace("Z", "+00:00"))
+                    actual_date = datetime.fromisoformat(actual_data["tweet_date"].replace("Z", "+00:00"))
+
+                    if actual_date != expected_date:
+                        failed_challenges += 1
+                        logger.warning(f"Tweet date mismatch: expected {expected_date}, got {actual_date}")
+                except ValueError:
+                    failed_challenges += 1
+                    logger.error(f"Invalid expected tweet date format: {expected_tweet_date}")
+
+            # Check if user data is in cache; if not, fetch from API and store in cache
+            user_data = await self.user_cache_manager.get_user_cache(user_id)
             if user_data:
-                actual_data["verified"] = user_data.verified
-                actual_data["follower_count"] = user_data.followers_count
+                logger.info(f"User data retrieved from cache for user_id {user_id}")
                 actual_data["user_id"] = user_id
+                actual_data["follower_count"] = user_data["follower_count"]
             else:
-                failed_challenges += 1
-                logger.warning(f"User not found on Twitter for user_id {user_id}")
+                user_data = self.twitter_service.get_user_details(user_id) if user_id else None
+                if user_data:
+                    actual_data["user_id"] = user_id
+                    actual_data["follower_count"] = str(user_data.followers_count)
 
-            # 3. Validate additional fields if IDs exist
-            if tweet_data and tweet_data.created_at != expected_tweet_date:
-                failed_challenges += 1
-                logger.warning(f"Tweet date mismatch: expected {expected_tweet_date}, got {tweet_data.created_at}")
-            if user_data:
-                if user_data.verified != expected_verified:
+                    # Store user data in cache
+                    await self.user_cache_manager.store_user_cache(
+                        user_id=user_id, follower_count=user_data.followers_count, verified=user_data.verified
+                    )
+                else:
                     failed_challenges += 1
-                    logger.warning(f"Verified status mismatch: expected {expected_verified}, got {user_data.verified}")
-                if user_data.followers_count != expected_follower_count:
-                    failed_challenges += 1
-                    logger.warning(
-                        f"Follower count mismatch: expected {expected_follower_count}, got {user_data.followers_count}")
+                    logger.warning(f"User not found on Twitter for user_id {user_id}")
 
             # Construct TwitterChallengesResponse
             challenge_response = TwitterChallengesResponse(
@@ -203,24 +232,29 @@ class Validator(Module):
 
         failed_challenges = response.failed_challenges
 
-        # Set scoring based on failed challenges (up to 5)
-        if failed_challenges == 5:
-            return 0  # Full failure, no score
-        elif failed_challenges == 4:
-            return 0.1  # Minimal score for significant failure
-        elif failed_challenges == 3:
-            return 0.2
+        # Base scoring based on failed challenges (up to 3 possible)
+        base_score = 1.0  # Perfect score for no failures
+        if failed_challenges == 3:
+            base_score = 0  # Full failure, no score
         elif failed_challenges == 2:
-            return 0.4
+            base_score = 0.3  # Significant issues
         elif failed_challenges == 1:
-            return 0.7  # Close to a perfect score but with a minor failure
-        else:
-            base_score = 1.0  # Perfect score if all checks are passed
+            base_score = 0.7  # Near-perfect, only one minor issue
 
-        # Apply the receipt miner multiplier for the final score adjustment
-        score = base_score * min(1.0, receipt_miner_multiplier)
+        # Convert follower_count to int, if possible
+        follower_count_str = response.challenge_response.output.get("follower_count", "0")
+        try:
+            follower_count = int(follower_count_str)
+        except ValueError:
+            follower_count = 0  # Default to 0 if conversion fails
 
-        return score
+        # Additional bonus for follower count above threshold
+        follower_bonus = 0.1 if follower_count > 1000 else 0
+
+        # Final score after applying bonuses and receipt multiplier
+        final_score = (base_score + follower_bonus) * min(1.0, receipt_miner_multiplier)
+
+        return min(final_score, 1.0)  # Ensure score does not exceed 1.0
 
     @staticmethod
     def adjust_token_weights_with_min_threshold(organic_prompts, min_threshold_ratio=5):
@@ -326,7 +360,7 @@ class Validator(Module):
                 score_dict[uid] = weighted_score
 
                 await self.miner_discovery_manager.store_miner_metadata(uid, miner_key, miner_address, miner_ip_port, token, version, graph_db)
-                await self.miner_discovery_manager.update_miner_challenges(miner_key, response.get_failed_challenges(), 2)
+                await self.miner_discovery_manager.update_miner_challenges(miner_key, response.failed_challenges, 2)
 
         if not score_dict:
             logger.info("No miner managed to give a valid answer")

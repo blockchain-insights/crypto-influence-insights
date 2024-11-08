@@ -16,7 +16,7 @@ class MinerDiscovery(OrmBase):
     __tablename__ = 'miner_discoveries'
     id = Column(Integer, primary_key=True, autoincrement=True)
     uid = Column(Integer, nullable=False)
-    miner_key = Column(String, nullable=False)
+    miner_key = Column(String, nullable=False, unique=True)
     token = Column(String, nullable=False)  # Single token per line
     miner_address = Column(String, nullable=False, default='0.0.0.0')
     miner_ip_port = Column(String, nullable=False, default='0')
@@ -45,7 +45,7 @@ class MinerDiscoveryManager:
                     version=version,
                     graph_db=graph_db
                 ).on_conflict_do_update(
-                    index_elements=['miner_key', 'token'],
+                    index_elements=['miner_key'],
                     set_={
                         'uid': uid,
                         'miner_address': miner_address,
