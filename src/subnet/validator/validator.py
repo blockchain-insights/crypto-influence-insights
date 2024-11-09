@@ -118,8 +118,6 @@ class Validator(Module):
             logger.info(f"Miner failed to get discovery", miner_key=miner_key, error=e)
             return None
 
-    from datetime import datetime
-
     async def _perform_challenges(self, client, miner_key, discovery) -> Optional[TwitterChallengeMinerResponse]:
         """
         Executes a Twitter challenge using TwitterService to check existence of tweet and user IDs,
@@ -136,66 +134,64 @@ class Validator(Module):
             )
 
             token = challenge_data.get("token", discovery.token)
-            output = challenge_data.get("output", {})
+            actual_data = challenge_data.get("output", {})  # Data provided by the miner
 
-            tweet_id = output.get("tweet_id")
-            user_id = output.get("user_id")
-            expected_tweet_date = output.get("tweet_date")
+            tweet_id = actual_data.get("tweet_id")
+            user_id = actual_data.get("user_id")
+            actual_tweet_date = actual_data.get("tweet_date")
 
             failed_challenges = 0
-            actual_data = {}
+            expected_data = {}
 
-            # Check if tweet data is in cache; if not, fetch from API and store in cache
+            # Retrieve tweet data from cache or API
             tweet_data = await self.tweet_cache_manager.get_tweet_cache(tweet_id)
             if tweet_data:
                 logger.info(f"Tweet data retrieved from cache for tweet_id {tweet_id}")
-                actual_data["tweet_date"] = tweet_data["tweet_date"]
-                actual_data["tweet_id"] = tweet_id
+                expected_data["tweet_date"] = tweet_data["tweet_date"]
+                expected_data["tweet_id"] = tweet_id
             else:
                 tweet_data = self.twitter_service.get_tweet_details(tweet_id) if tweet_id else None
                 if tweet_data:
-                    # Ensure tweet date is a string for consistent output
-                    actual_data["tweet_date"] = tweet_data.created_at if isinstance(tweet_data.created_at, str) else tweet_data.created_at.isoformat()
-                    actual_data["tweet_id"] = tweet_id
+                    # Ensure consistent storage format: convert to UTC and remove timezone
+                    tweet_date = (
+                        datetime.fromisoformat(tweet_data.created_at.replace("Z", "+00:00")).astimezone(
+                            timezone.utc).replace(tzinfo=None)
+                        if isinstance(tweet_data.created_at, str)
+                        else tweet_data.created_at.astimezone(timezone.utc).replace(tzinfo=None)
+                    )
+                    expected_data["tweet_date"] = tweet_date.isoformat()
+                    expected_data["tweet_id"] = tweet_id
 
                     # Store tweet data in cache
-                    tweet_date = tweet_data.created_at
-                    if isinstance(tweet_date, str):
-                        # Convert to a timezone-aware datetime
-                        tweet_date = datetime.fromisoformat(tweet_date.replace("Z", "+00:00"))
-
-                    # Ensure tweet_date is UTC and offset-naive
-                    tweet_date = tweet_date.astimezone(timezone.utc).replace(tzinfo=None)
-
                     await self.tweet_cache_manager.store_tweet_cache(tweet_id=tweet_id, tweet_date=tweet_date)
                 else:
                     failed_challenges += 1
                     logger.warning(f"Tweet not found on Twitter for tweet_id {tweet_id}")
 
             # Validate tweet date
-            if "tweet_date" in actual_data:
+            if "tweet_date" in expected_data:
                 try:
-                    expected_date = datetime.fromisoformat(expected_tweet_date.replace("Z", "+00:00"))
-                    actual_date = datetime.fromisoformat(actual_data["tweet_date"].replace("Z", "+00:00"))
+                    # Convert both actual and expected dates to UTC and make them timezone-naive
+                    expected_date = datetime.fromisoformat(expected_data["tweet_date"])
+                    actual_date = datetime.fromisoformat(actual_tweet_date.replace("Z", "+00:00")).astimezone(
+                        timezone.utc).replace(tzinfo=None)
 
                     if actual_date != expected_date:
                         failed_challenges += 1
                         logger.warning(f"Tweet date mismatch: expected {expected_date}, got {actual_date}")
                 except ValueError:
                     failed_challenges += 1
-                    logger.error(f"Invalid expected tweet date format: {expected_tweet_date}")
+                    logger.error(f"Invalid tweet date format: {actual_tweet_date}")
 
-            # Check if user data is in cache; if not, fetch from API and store in cache
+            # Retrieve user data from cache or API
             user_data = await self.user_cache_manager.get_user_cache(user_id)
             if user_data:
                 logger.info(f"User data retrieved from cache for user_id {user_id}")
-                actual_data["user_id"] = user_id
-                actual_data["follower_count"] = user_data["follower_count"]
+                expected_data["user_id"] = user_id
             else:
                 user_data = self.twitter_service.get_user_details(user_id) if user_id else None
                 if user_data:
-                    actual_data["user_id"] = user_id
-                    actual_data["follower_count"] = str(user_data.followers_count)
+                    expected_data["user_id"] = user_id
 
                     # Store user data in cache
                     await self.user_cache_manager.store_user_cache(
@@ -208,7 +204,7 @@ class Validator(Module):
             # Construct TwitterChallengesResponse
             challenge_response = TwitterChallengesResponse(
                 token=token,
-                output=actual_data
+                output=actual_data  # Here `output` contains the data received from the miner
             )
 
             # Return with failed challenge count

@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -10,12 +10,12 @@ class Discovery(BaseModel):
 
 class TwitterChallenge(BaseModel):
     token: str
-    output: Optional[Dict[str, Optional[str]]] = None
+    output: Optional[Dict[str, Optional[Any]]] = None
 
 
 class TwitterChallengesResponse(BaseModel):
     token: str
-    output: Dict[str, Optional[str]]
+    output: Dict[str, Optional[Any]]
 
 class TwitterChallengeMinerResponse(BaseModel):
     token: str
