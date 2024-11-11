@@ -8,14 +8,14 @@ class TwitterFraudDetectionApi(QueryApi):
         super().__init__()
         self.validator = validator
 
-    async def _execute_query(self, query: str) -> dict:
+    async def _execute_query(self, token: str, query: str) -> dict:
         try:
-            data = await self.validator.query_miner(query=query)
+            data = await self.validator.query_miner(token, query=query, miner_key=None)
             return data
         except Exception as e:
             raise Exception(f"Error executing query: {str(e)}")
 
-    async def get_communities(self, min_size: int) -> dict:
+    async def get_communities(self, token: str, min_size: int) -> dict:
         query = f"""
         CALL gds.louvain.stream({{
             nodeProjection: ['User', 'Token', 'Tweet'],
@@ -25,9 +25,9 @@ class TwitterFraudDetectionApi(QueryApi):
         WHERE communityId.size >= {min_size}
         RETURN gds.util.asNode(nodeId).id AS node, communityId
         """
-        return await self._execute_query(query)
+        return await self._execute_query(token, query)
 
-    async def get_influencers(self, threshold: float) -> dict:
+    async def get_influencers(self, token: str, threshold: float) -> dict:
         query = f"""
         CALL gds.pageRank.stream({{
             nodeProjection: 'User',
@@ -37,9 +37,9 @@ class TwitterFraudDetectionApi(QueryApi):
         WHERE score > {threshold}
         RETURN gds.util.asNode(nodeId).id AS node, score
         """
-        return await self._execute_query(query)
+        return await self._execute_query(token, query)
 
-    async def get_similarity(self, similarity_threshold: float) -> dict:
+    async def get_similarity(self, token: str, similarity_threshold: float) -> dict:
         query = f"""
         CALL gds.nodeSimilarity.stream({{
             nodeProjection: 'User',
@@ -49,7 +49,7 @@ class TwitterFraudDetectionApi(QueryApi):
         WHERE similarity > {similarity_threshold}
         RETURN gds.util.asNode(node1).id AS user1, gds.util.asNode(node2).id AS user2, similarity
         """
-        return await self._execute_query(query)
+        return await self._execute_query(token, query)
 
     async def get_scam_mentions(self, token: str, timeframe: str) -> dict:
         query = f"""
@@ -57,9 +57,9 @@ class TwitterFraudDetectionApi(QueryApi):
         WHERE tweet.timestamp >= datetime().epochMillis - duration('{timeframe}').toMillis()
         RETURN tweet.id AS tweet, tweet.timestamp AS timestamp
         """
-        return await self._execute_query(query)
+        return await self._execute_query(token, query)
 
-    async def get_anomalies(self) -> dict:
+    async def get_anomalies(self, token: str) -> dict:
         query = """
         CALL gds.beta.node2vec.stream({
             nodeProjection: ['User', 'Token'],
@@ -70,4 +70,4 @@ class TwitterFraudDetectionApi(QueryApi):
         YIELD nodeId, embedding
         RETURN gds.util.asNode(nodeId).id AS node, embedding
         """
-        return await self._execute_query(query)
+        return await self._execute_query(token, query)

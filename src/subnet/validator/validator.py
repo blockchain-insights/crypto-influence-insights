@@ -484,21 +484,20 @@ class Validator(Module):
 
     async def _query_miner(self, miner, query):
         miner_key = miner['miner_key']
-        miner_tokens = miner['tokens']
         module_ip = miner['miner_address']
         module_port = int(miner['miner_ip_port'])
         module_client = ModuleClient(module_ip, module_port, self.key)
         try:
-            llm_query_result = await module_client.call(
+            query_result = await module_client.call(
                 "query",
                 miner_key,
                 {"query": query, "validator_key": self.key.ss58_address},
                 timeout=self.query_timeout,
             )
-            if not llm_query_result:
+            if not query_result:
                 return None
 
-            return llm_query_result
+            return query_result
         except Exception as e:
             logger.warning(f"Failed to query miner", error=e, miner_key=miner_key)
             return None
