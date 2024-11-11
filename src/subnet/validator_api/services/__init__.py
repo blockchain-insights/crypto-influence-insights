@@ -1,43 +1,24 @@
-from typing import Optional, List
-
+from typing import Optional, List, Dict
 
 class QueryApi:
+    """Interface for querying fraud detection and Twitter analysis data."""
 
-    async def get_block(self, block_height: int) -> dict:
+    async def get_communities(self, min_size: int) -> Dict:
+        """Retrieve communities of interconnected users, tweets, or tokens."""
+        raise NotImplementedError("Method 'get_communities' must be implemented by subclass.")
 
+    async def get_influencers(self, threshold: float) -> Dict:
+        """Identify influential nodes, such as users or tokens with high centrality scores."""
+        raise NotImplementedError("Method 'get_influencers' must be implemented by subclass.")
 
-        # i need to call validator.query_funds_flow(network, cypher_query)
+    async def get_similarity(self, similarity_threshold: float) -> Dict:
+        """Detect similar patterns or behaviors between nodes based on a similarity threshold."""
+        raise NotImplementedError("Method 'get_similarity' must be implemented by subclass.")
 
+    async def get_scam_mentions(self, token: str, timeframe: str) -> Dict:
+        """Identify mentions of a token across multiple tweets within a specific timeframe."""
+        raise NotImplementedError("Method 'get_scam_mentions' must be implemented by subclass.")
 
-        pass
-
-    async def get_transaction_by_tx_id(self, tx_id: str) -> dict:
-        pass
-
-    async def get_address_transactions(self,
-                                       address: str,
-                                       start_block_height: Optional[int],
-                                       end_block_height: Optional[int]) -> dict:
-        pass
-
-    async def get_funds_flow(self,
-                             address: str,
-                             intermediate_addresses: Optional[List[str]],
-                             hops: Optional[int],
-                             start_block_height: Optional[int],
-                             end_block_height: Optional[int]) -> dict:
-        pass
-
-    async def get_balance_tracking(self,
-                                   addresses: Optional[List[str]],
-                                   min_amount: Optional[int],
-                                   max_amount: Optional[int],
-                                   start_block_height: Optional[int],
-                                   end_block_height: Optional[int]) -> dict:
-        pass
-
-    async def get_balance_tracking_timestamp(self,
-                                             start_block_height: Optional[int],
-                                             end_block_height: Optional[int]) -> dict:
-        pass
-
+    async def get_anomalies(self) -> Dict:
+        """Detect anomalies in node behavior, which may indicate potential fraud."""
+        raise NotImplementedError("Method 'get_anomalies' must be implemented by subclass.")
