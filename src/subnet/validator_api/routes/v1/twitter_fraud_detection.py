@@ -3,9 +3,9 @@ from fastapi import Depends, APIRouter, Query, HTTPException
 from pydantic import BaseModel
 
 from src.subnet.validator.validator import Validator
-from src.subnet.validator_api import get_validator, api_key_auth
 from src.subnet.validator_api.helpers.reponse_formatter import format_response, ResponseType
 from src.subnet.validator_api.services.twitter_fraud_detection_api import TwitterFraudDetectionApi
+from src.subnet.validator_api import get_validator
 
 twitter_fraud_detection_router = APIRouter(prefix="/v1/twitter-fraud-detection", tags=["twitter-fraud-detection"])
 
@@ -15,8 +15,7 @@ async def detect_communities(
     network: str,
     min_size: int = Query(3),
     response_type: ResponseType = Query(ResponseType.json),
-    validator: Validator = Depends(get_validator),
-    api_key: str = Depends(api_key_auth),
+    validator: Validator = Depends(get_validator)
 ):
 
     query_api = TwitterFraudDetectionApi(validator)
@@ -30,8 +29,7 @@ async def detect_influencers(
     network: str,
     threshold: float = Query(0.1),
     response_type: ResponseType = Query(ResponseType.json),
-    validator: Validator = Depends(get_validator),
-    api_key: str = Depends(api_key_auth),
+    validator: Validator = Depends(get_validator)
 ):
     query_api = TwitterFraudDetectionApi(validator)
     data = await query_api.get_influencers(threshold=threshold)
@@ -44,8 +42,7 @@ async def detect_similarity(
     network: str,
     similarity_threshold: float = Query(0.7),
     response_type: ResponseType = Query(ResponseType.json),
-    validator: Validator = Depends(get_validator),
-    api_key: str = Depends(api_key_auth),
+    validator: Validator = Depends(get_validator)
 ):
     query_api = TwitterFraudDetectionApi(validator)
     data = await query_api.get_similarity(similarity_threshold=similarity_threshold)
@@ -59,8 +56,7 @@ async def detect_scam_mentions(
     token: str,
     timeframe: str = Query("24h"),
     response_type: ResponseType = Query(ResponseType.json),
-    validator: Validator = Depends(get_validator),
-    api_key: str = Depends(api_key_auth),
+    validator: Validator = Depends(get_validator)
 ):
     query_api = TwitterFraudDetectionApi(validator)
     data = await query_api.get_scam_mentions(token=token, timeframe=timeframe)
@@ -72,8 +68,7 @@ async def detect_scam_mentions(
 async def detect_anomalies(
     network: str,
     response_type: ResponseType = Query(ResponseType.json),
-    validator: Validator = Depends(get_validator),
-    api_key: str = Depends(api_key_auth),
+    validator: Validator = Depends(get_validator)
 ):
     query_api = TwitterFraudDetectionApi(validator)
     data = await query_api.get_anomalies()

@@ -9,16 +9,17 @@ from fastapi.security import APIKeyHeader
 from loguru import logger
 from substrateinterface import Keypair
 
-from src.subnet.validator.database.models.api_key import ApiKeyManager
-from src.subnet.validator.database.models.challenge_balance_tracking import ChallengeBalanceTrackingManager
-from src.subnet.validator.database.models.challenge_funds_flow import ChallengeFundsFlowManager
 from src.subnet.validator.database.models.miner_discovery import MinerDiscoveryManager
 from src.subnet.validator.database.models.miner_receipt import MinerReceiptManager
 from src.subnet.validator._config import load_environment, SettingsManager
+from src.subnet.validator.database.models.tweet_cache import TweetCacheManager
+from src.subnet.validator.database.models.user_cache import UserCacheManager
 from src.subnet.validator.database.session_manager import DatabaseSessionManager
+from src.subnet.validator.twitter import TwitterService
 from src.subnet.validator_api.rate_limiter import RateLimiterMiddleware
 from src.subnet.validator.validator import Validator
 from src.subnet.validator.weights_storage import WeightsStorage
+from src.subnet.validator.twitter import TwitterClient, TwitterService, RoundRobinBearerTokenProvider
 
 if len(sys.argv) != 2:
     env = 'mainnet'
@@ -54,12 +55,11 @@ session_manager = DatabaseSessionManager()
 session_manager.init(settings.DATABASE_URL)
 miner_discovery_manager = MinerDiscoveryManager(session_manager)
 miner_receipt_manager = MinerReceiptManager(session_manager)
-challenge_funds_flow_manager = ChallengeFundsFlowManager(session_manager)
-challenge_balance_tracking_manager = ChallengeBalanceTrackingManager(session_manager)
-
-
-global api_key_manager
-api_key_manager = ApiKeyManager(session_manager)
+tweet_cache_manager = TweetCacheManager(session_manager)
+user_cache_manager = UserCacheManager(session_manager)
+twitter_round_robbin_token_provider = RoundRobinBearerTokenProvider(settings)
+twitter_client = TwitterClient(twitter_round_robbin_token_provider)
+twitter_service = TwitterService(twitter_client)
 
 validator = Validator(
     keypair,
@@ -67,9 +67,10 @@ validator = Validator(
     c_client,
     weights_storage,
     miner_discovery_manager,
-    challenge_funds_flow_manager,
-    challenge_balance_tracking_manager,
     miner_receipt_manager,
+    tweet_cache_manager,
+    user_cache_manager,
+    twitter_service,
     query_timeout=settings.QUERY_TIMEOUT,
     challenge_timeout=settings.CHALLENGE_TIMEOUT,
 )
@@ -77,14 +78,3 @@ validator = Validator(
 
 def get_validator():
     return validator
-
-api_key_header = APIKeyHeader(name='x-api-key', auto_error = False)
-
-
-async def api_key_auth(api_key: str = Security(api_key_header)):
-    global api_key_manager
-    if api_key_manager is None:
-        raise HTTPException(status_code=500, detail="API Key Manager not initialized")
-    has_access = await api_key_manager.validate_api_key(api_key)
-    if not has_access:
-        raise HTTPException(status_code=401, detail="Missing or Invalid API key")
