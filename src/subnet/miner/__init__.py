@@ -6,7 +6,7 @@ from src.subnet.miner._config import MinerSettings
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from loguru import logger
-from neo4j import READ_ACCESS, GraphDatabase
+from neo4j import WRITE_ACCESS, READ_ACCESS, GraphDatabase
 from neo4j.exceptions import Neo4jError
 
 class GraphSearch:
