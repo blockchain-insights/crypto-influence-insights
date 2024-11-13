@@ -1,4 +1,5 @@
 from typing import Dict
+import re
 from src.subnet.validator.validator import Validator
 from src.subnet.validator_api.services import QueryApi
 
@@ -47,8 +48,10 @@ class TwitterFraudDetectionApi(QueryApi):
         query = f"""
         CALL gds.louvain.stream('{graph_name}')
         YIELD nodeId, communityId
-        WHERE communityId.size >= {min_size}
-        RETURN gds.util.asNode(nodeId).id AS node, communityId
+        WITH communityId, nodeId, COUNT(nodeId) AS communitySize
+        WHERE communitySize >= {min_size}
+        MATCH (n) WHERE id(n) = nodeId
+        RETURN communityId, communitySize, n.id AS node
         """
         result = await self._execute_query(token, query)
         await self._drop_in_memory_graph(token, graph_name)
@@ -81,11 +84,22 @@ class TwitterFraudDetectionApi(QueryApi):
         return result
 
     async def get_scam_mentions(self, token: str, timeframe: str) -> dict:
-        # No in-memory graph needed for regular Cypher MATCH queries
+        # Parse the hours from the timeframe string, e.g., "24h" to 24
+        match = re.match(r"(\d+)h", timeframe)
+        if not match:
+            raise ValueError("Invalid timeframe format. Expected format like '24h'.")
+
+        # Convert the hours to an integer
+        hours = int(match.group(1))
+
+        # Construct the duration string for Neo4j (e.g., 'PT24H' for 24 hours)
+        duration_str = f'PT{hours}H'
+
+        # Adjust the Cypher query to handle datetime comparison
         query = f"""
-        MATCH (t:Token {{name: '{token}'}})<-[:MENTIONED_IN]-(tweet:Tweet)
-        WHERE tweet.timestamp >= datetime().epochMillis - duration('{timeframe}').toMillis()
-        RETURN tweet.id AS tweet, tweet.timestamp AS timestamp
+        MATCH (t:Token {{name: '{token}'}})-[:MENTIONED_IN]->(tweet:Tweet)
+        WHERE datetime(replace(tweet.timestamp, " ", "T")) >= datetime() - duration('{duration_str}')
+        RETURN tweet.id AS tweet_id, tweet.text as tweet_text, tweet.timestamp AS timestamp
         """
         return await self._execute_query(token, query)
 

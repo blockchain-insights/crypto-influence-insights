@@ -1,15 +1,20 @@
 import time
 from typing import Optional, Dict
-
 from src.subnet.validator.database import db_manager
 from src.subnet.miner._config import MinerSettings
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from loguru import logger
-from neo4j import WRITE_ACCESS, READ_ACCESS, GraphDatabase
+from neo4j import WRITE_ACCESS, GraphDatabase
 from neo4j.exceptions import Neo4jError
 
+
 class GraphSearch:
+    # Define prohibited clauses to prevent data modification
+    MODIFICATION_CLAUSES = {"CREATE", "DELETE", "SET", "MERGE", "REMOVE"}
+
+    # Define allowed GDS modification commands
+    ALLOWED_GDS_COMMANDS = {"CALL GDS.GRAPH.PROJECT", "CALL GDS.GRAPH.DROP"}
 
     def __init__(self, settings: MinerSettings):
         self.driver = GraphDatabase.driver(
@@ -23,7 +28,18 @@ class GraphSearch:
         )
 
     def execute_query(self, query: str):
-        with self.driver.session(default_access_mode=READ_ACCESS) as session:
+        # Convert query to uppercase for case-insensitive validation
+        query_upper = query.upper().strip()
+
+        # Check for any disallowed modification commands
+        if any(clause in query_upper for clause in self.MODIFICATION_CLAUSES):
+            # Allow only specific GDS commands by checking if the query contains an allowed GDS command
+            if not any(command in query_upper for command in self.ALLOWED_GDS_COMMANDS):
+                raise ValueError(
+                    "Modification queries are not allowed. Only GDS project/drop and read-only queries are permitted."
+                )
+
+        with self.driver.session(default_access_mode=WRITE_ACCESS) as session:
             try:
                 result = session.run(query)
 
@@ -72,12 +88,12 @@ class GraphSearch:
                 return results_data
 
             except Neo4jError as e:
-                raise ValueError("Query attempted to modify data, which is not allowed.") from e
+                raise ValueError(e.message)
 
     def solve_twitter_challenge(self, token: str) -> Optional[Dict]:
         start_time = time.time()
         try:
-            with self.driver.session() as session:
+            with self.driver.session(default_access_mode=WRITE_ACCESS) as session:
                 # Execute the Cypher query to find the latest tweet for the token
                 query = f"""
                     MATCH (u:UserAccount)-[:MENTIONS]->(token:Token {{name: "{token}"}})
