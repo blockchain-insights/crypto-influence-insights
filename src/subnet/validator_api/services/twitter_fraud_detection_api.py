@@ -38,6 +38,7 @@ class TwitterFraudDetectionApi(QueryApi):
         """
         await self._execute_query(token, query)
 
+
     async def _drop_in_memory_graph(self, token: str, graph_name: str) -> None:
         query = f"CALL gds.graph.drop('{graph_name}')"
         await self._execute_query(token, query)
@@ -57,30 +58,58 @@ class TwitterFraudDetectionApi(QueryApi):
         await self._drop_in_memory_graph(token, graph_name)
         return result
 
-    async def get_influencers(self, token: str, threshold: float) -> dict:
-        graph_name = "influencerGraph"
-        await self._create_in_memory_graph(token, graph_name)
+    async def get_influencers(self, token: str, min_follower_count: int = 1000, limit: int = 10) -> dict:
         query = f"""
-        CALL gds.pageRank.stream('{graph_name}')
-        YIELD nodeId, score
-        WHERE score > {threshold}
-        RETURN gds.util.asNode(nodeId).id AS node, score
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
+        WHERE u.follower_count >= {min_follower_count} AND u.engagement_level > 0
+        RETURN u.user_id AS user_id, u.username AS user_name, u.follower_count AS follower_count, 
+               COUNT(t) AS tweet_count, AVG(u.engagement_level) AS avg_engagement_level
+        ORDER BY avg_engagement_level DESC, tweet_count DESC
+        LIMIT {limit}
         """
         result = await self._execute_query(token, query)
-        await self._drop_in_memory_graph(token, graph_name)
         return result
 
-    async def get_similarity(self, token: str, similarity_threshold: float) -> dict:
-        graph_name = "similarityGraph"
-        await self._create_in_memory_graph(token, graph_name)
-        query = f"""
-        CALL gds.nodeSimilarity.stream('{graph_name}')
-        YIELD node1, node2, similarity
-        WHERE similarity > {similarity_threshold}
-        RETURN gds.util.asNode(node1).id AS user1, gds.util.asNode(node2).id AS user2, similarity
-        """
+    async def get_similarity(self, token: str, similarity_threshold: float, type: str, limit: int) -> dict:
+        # Define Cypher queries for the two similarity types
+        if type == "activity-based":
+            # Manually calculate Euclidean distance similarity
+            query = f"""
+            MATCH (u1:UserAccount)-[:POSTED]->(t1:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}}),
+                  (u2:UserAccount)-[:POSTED]->(t2:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
+            WHERE id(u1) < id(u2)
+            WITH u1, u2, 
+                 COUNT(t1) AS tweets_u1, COUNT(t2) AS tweets_u2,
+                 u1.engagement_level AS engagement_u1, u2.engagement_level AS engagement_u2
+            WITH u1, u2,
+                 1 / (1 + sqrt((tweets_u1 - tweets_u2)^2 + (engagement_u1 - engagement_u2)^2)) AS similarity
+            WHERE similarity > {similarity_threshold}
+            RETURN u1.user_id AS user1, u2.user_id AS user2, similarity
+            ORDER BY similarity DESC
+            LIMIT {limit}
+            """
+        elif type == "engagement-based":
+            # Manually calculate cosine similarity
+            query = f"""
+            MATCH (u1:UserAccount)-[:POSTED]->(t1:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}}),
+                  (u2:UserAccount)-[:POSTED]->(t2:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
+            WHERE id(u1) < id(u2)
+            WITH u1, u2, 
+                 COUNT(t1) AS tweet_count_u1, COUNT(t2) AS tweet_count_u2,
+                 u1.follower_count AS follower_count_u1, u2.follower_count AS follower_count_u2,
+                 u1.engagement_level AS engagement_u1, u2.engagement_level AS engagement_u2
+            WITH u1, u2,
+                 (follower_count_u1 * follower_count_u2 + engagement_u1 * engagement_u2 + tweet_count_u1 * tweet_count_u2) /
+                 (sqrt(follower_count_u1^2 + engagement_u1^2 + tweet_count_u1^2) * sqrt(follower_count_u2^2 + engagement_u2^2 + tweet_count_u2^2)) AS similarity
+            WHERE similarity > {similarity_threshold}
+            RETURN u1.user_id AS user1, u2.user_id AS user2, similarity
+            ORDER BY similarity DESC
+            LIMIT {limit}
+            """
+        else:
+            raise ValueError("Invalid type specified. Expected 'activity-based' or 'engagement-based'.")
+
         result = await self._execute_query(token, query)
-        await self._drop_in_memory_graph(token, graph_name)
         return result
 
     async def get_scam_mentions(self, token: str, timeframe: str) -> dict:

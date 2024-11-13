@@ -27,12 +27,13 @@ async def detect_communities(
 @twitter_fraud_detection_router.get("/{token}/detect-influencers")
 async def detect_influencers(
     token: str,
-    threshold: float = Query(0.1),
+    min_follower_count: int = Query(1000, description="Minimum follower count to qualify as an influencer"),
+    limit: int = Query(10, description="Number of top influencers to return"),
     response_type: ResponseType = Query(ResponseType.json),
     validator: Validator = Depends(get_validator)
 ):
     query_api = TwitterFraudDetectionApi(validator)
-    data = await query_api.get_influencers(token=token, threshold=threshold)
+    data = await query_api.get_influencers(token=token, min_follower_count=min_follower_count, limit=limit)
 
     return format_response(data, response_type)
 
@@ -41,11 +42,18 @@ async def detect_influencers(
 async def detect_similarity(
     token: str,
     similarity_threshold: float = Query(0.7),
+    type: str = Query("activity-based", regex="^(activity-based|engagement-based)$"),
+    limit: int = Query(10),
     response_type: ResponseType = Query(ResponseType.json),
     validator: Validator = Depends(get_validator)
 ):
     query_api = TwitterFraudDetectionApi(validator)
-    data = await query_api.get_similarity(token=token, similarity_threshold=similarity_threshold)
+    data = await query_api.get_similarity(
+        token=token,
+        similarity_threshold=similarity_threshold,
+        type=type,
+        limit=limit
+    )
 
     return format_response(data, response_type)
 
