@@ -1,7 +1,9 @@
 from typing import Dict
+import numpy as np
 import re
 from src.subnet.validator.validator import Validator
 from src.subnet.validator_api.services import QueryApi
+from loguru import logger
 
 class TwitterFraudDetectionApi(QueryApi):
     def __init__(self, validator: Validator):
@@ -70,10 +72,10 @@ class TwitterFraudDetectionApi(QueryApi):
         result = await self._execute_query(token, query)
         return result
 
-    async def get_similarity(self, token: str, similarity_threshold: float, type: str, limit: int) -> dict:
+    async def get_similarity(self, token: str, similarity_threshold: float, similarity_type: str,
+                             limit: int = 10) -> dict:
         # Define Cypher queries for the two similarity types
-        if type == "activity-based":
-            # Manually calculate Euclidean distance similarity
+        if similarity_type == "activity-based":
             query = f"""
             MATCH (u1:UserAccount)-[:POSTED]->(t1:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}}),
                   (u2:UserAccount)-[:POSTED]->(t2:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
@@ -84,25 +86,26 @@ class TwitterFraudDetectionApi(QueryApi):
             WITH u1, u2,
                  1 / (1 + sqrt((tweets_u1 - tweets_u2)^2 + (engagement_u1 - engagement_u2)^2)) AS similarity
             WHERE similarity > {similarity_threshold}
-            RETURN u1.user_id AS user1, u2.user_id AS user2, similarity
+            RETURN u1.user_id AS user1_id, u1.username AS user1_name, 
+                   u2.user_id AS user2_id, u2.username AS user2_name, similarity
             ORDER BY similarity DESC
             LIMIT {limit}
             """
-        elif type == "engagement-based":
-            # Manually calculate cosine similarity
+        elif similarity_type == "engagement-based":
             query = f"""
             MATCH (u1:UserAccount)-[:POSTED]->(t1:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}}),
                   (u2:UserAccount)-[:POSTED]->(t2:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
             WHERE id(u1) < id(u2)
             WITH u1, u2, 
-                 COUNT(t1) AS tweet_count_u1, COUNT(t2) AS tweet_count_u2,
-                 u1.follower_count AS follower_count_u1, u2.follower_count AS follower_count_u2,
+                 COUNT(t1) AS tweets_u1, COUNT(t2) AS tweets_u2,
+                 u1.follower_count AS followers_u1, u2.follower_count AS followers_u2,
                  u1.engagement_level AS engagement_u1, u2.engagement_level AS engagement_u2
             WITH u1, u2,
-                 (follower_count_u1 * follower_count_u2 + engagement_u1 * engagement_u2 + tweet_count_u1 * tweet_count_u2) /
-                 (sqrt(follower_count_u1^2 + engagement_u1^2 + tweet_count_u1^2) * sqrt(follower_count_u2^2 + engagement_u2^2 + tweet_count_u2^2)) AS similarity
+                 (followers_u1 * followers_u2 + engagement_u1 * engagement_u2 + tweets_u1 * tweets_u2) /
+                 (sqrt(followers_u1^2 + engagement_u1^2 + tweets_u1^2) * sqrt(followers_u2^2 + engagement_u2^2 + tweets_u2^2)) AS similarity
             WHERE similarity > {similarity_threshold}
-            RETURN u1.user_id AS user1, u2.user_id AS user2, similarity
+            RETURN u1.user_id AS user1_id, u1.username AS user1_name, 
+                   u2.user_id AS user2_id, u2.username AS user2_name, similarity
             ORDER BY similarity DESC
             LIMIT {limit}
             """
@@ -133,13 +136,56 @@ class TwitterFraudDetectionApi(QueryApi):
         return await self._execute_query(token, query)
 
     async def get_anomalies(self, token: str) -> dict:
-        graph_name = "anomalyGraph"
-        await self._create_in_memory_graph(token, graph_name)
+        # Query to extract key behavioral metrics, including follower count
         query = f"""
-        CALL gds.beta.node2vec.stream('{graph_name}')
-        YIELD nodeId, embedding
-        RETURN gds.util.asNode(nodeId).id AS node, embedding
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
+        WITH u, COUNT(t) AS post_count, AVG(u.engagement_level) AS avg_engagement, 
+             u.follower_count AS follower_count
+        RETURN u.user_id AS user_id, u.username AS username, post_count, avg_engagement, follower_count
         """
+        # Execute the query to get the metrics
         result = await self._execute_query(token, query)
-        await self._drop_in_memory_graph(token, graph_name)
-        return result
+
+        # Log the result to inspect its structure
+        logger.info(f"Result from _execute_query: {result}")
+
+        # Step 2: Process results to identify anomalies
+        processed_results = self._detect_anomalies(result)
+        return processed_results
+
+    def _detect_anomalies(self, data: dict) -> dict:
+        # Check if 'response' key contains the rows as expected
+        if "response" not in data or not isinstance(data["response"], list):
+            logger.error("Unexpected data format: %s", data)
+            return data  # Return the original data if format is unexpected
+
+        # Extract the rows from response
+        rows = data["response"]
+
+        # Extract follower counts and average engagement for calculation
+        follower_counts = [row['follower_count'] for row in rows if row.get('follower_count') is not None]
+        avg_engagements = [row['avg_engagement'] for row in rows if row.get('avg_engagement') is not None]
+
+        # Calculate quantile thresholds for anomaly detection
+        if len(follower_counts) > 1 and len(avg_engagements) > 1:
+            low_follower_threshold = np.percentile(follower_counts, 15)
+            high_follower_threshold = np.percentile(follower_counts, 85)
+            low_engagement_threshold = np.percentile(avg_engagements, 15)
+            high_engagement_threshold = np.percentile(avg_engagements, 85)
+
+            # Detect anomalies based on disproportionate engagement to follower count
+            for user in rows:
+                followers = user.get('follower_count', 0)
+                engagement = user.get('avg_engagement', 0)
+
+                # Check for high followers with low engagement or low followers with high engagement
+                is_anomalous = (
+                        (followers >= high_follower_threshold and engagement <= low_engagement_threshold) or
+                        (followers <= low_follower_threshold and engagement >= high_engagement_threshold)
+                )
+
+                # Label based on anomaly status directly in the original response data
+                user['anomaly_label'] = "Anomalous" if is_anomalous else "Normal"
+
+        # Return the modified data with labeled anomalies
+        return data

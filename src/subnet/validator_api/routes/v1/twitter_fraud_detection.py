@@ -51,7 +51,7 @@ async def detect_similarity(
     data = await query_api.get_similarity(
         token=token,
         similarity_threshold=similarity_threshold,
-        type=type,
+        similarity_type=type,
         limit=limit
     )
 

@@ -11,7 +11,7 @@ class QueryApi:
         """Identify influential nodes, such as users or tokens with high centrality scores."""
         raise NotImplementedError("Method 'get_influencers' must be implemented by subclass.")
 
-    async def get_similarity(self, token: str, similarity_threshold: float, type: str) -> dict:
+    async def get_similarity(self, token: str, similarity_threshold: float, similarity_type: str, limit: int) -> dict:
         """Detect similar patterns or behaviors between nodes based on a similarity threshold."""
         raise NotImplementedError("Method 'get_similarity' must be implemented by subclass.")
 
