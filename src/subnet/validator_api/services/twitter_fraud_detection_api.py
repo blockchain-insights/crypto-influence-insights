@@ -17,47 +17,32 @@ class TwitterFraudDetectionApi(QueryApi):
         except Exception as e:
             raise Exception(f"Error executing query: {str(e)}")
 
-    async def _create_in_memory_graph(self, token: str, graph_name: str) -> None:
-        query = f"""
-        CALL gds.graph.project(
-            '{graph_name}',
-            ['UserAccount', 'Token', 'Tweet'],
-            {{
-                MENTIONS: {{
-                    type: 'MENTIONS',
-                    orientation: 'NATURAL'
-                }},
-                MENTIONED_IN: {{
-                    type: 'MENTIONED_IN',
-                    orientation: 'NATURAL'
-                }},
-                POSTED: {{
-                    type: 'POSTED',
-                    orientation: 'NATURAL'
-                }}
-            }}
-        )
+    async def get_user_engagement_trends(self, token: str, days: int = 30) -> dict:
         """
-        await self._execute_query(token, query)
-
-
-    async def _drop_in_memory_graph(self, token: str, graph_name: str) -> None:
-        query = f"CALL gds.graph.drop('{graph_name}')"
-        await self._execute_query(token, query)
-
-    async def get_communities(self, token: str, min_size: int) -> dict:
-        graph_name = "communityGraph"
-        await self._create_in_memory_graph(token, graph_name)
-        query = f"""
-        CALL gds.louvain.stream('{graph_name}')
-        YIELD nodeId, communityId
-        WITH communityId, nodeId, COUNT(nodeId) AS communitySize
-        WHERE communitySize >= {min_size}
-        MATCH (n) WHERE id(n) = nodeId
-        RETURN communityId, communitySize, n.id AS node
+        Retrieves engagement trends for a specified token over the last `days`.
         """
+
+        # Cypher query to aggregate engagement per day for a specified token
+        query = f"""
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+        WITH u, t, tok, datetime({{ 
+            year: toInteger(substring(t.timestamp, 0, 4)), 
+            month: toInteger(substring(t.timestamp, 5, 2)), 
+            day: toInteger(substring(t.timestamp, 8, 2)),
+            hour: toInteger(substring(t.timestamp, 11, 2)),
+            minute: toInteger(substring(t.timestamp, 14, 2)),
+            second: toInteger(substring(t.timestamp, 17, 2))
+        }}) AS parsed_timestamp
+        WHERE parsed_timestamp >= datetime() - duration({{ days: {days} }})
+        RETURN date(parsed_timestamp) AS date, 
+               COUNT(DISTINCT u.user_id) AS active_users,
+               SUM(u.engagement_level) AS daily_engagement
+        ORDER BY date ASC
+        """
+
+        # Execute the query
         result = await self._execute_query(token, query)
-        await self._drop_in_memory_graph(token, graph_name)
+
         return result
 
     async def get_influencers(self, token: str, min_follower_count: int = 1000, limit: int = 10) -> dict:

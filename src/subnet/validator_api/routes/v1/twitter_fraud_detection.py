@@ -10,16 +10,18 @@ from src.subnet.validator_api import get_validator
 twitter_fraud_detection_router = APIRouter(prefix="/v1/twitter-fraud-detection", tags=["twitter-fraud-detection"])
 
 
-@twitter_fraud_detection_router.get("/{token}/detect-communities")
-async def detect_communities(
+@twitter_fraud_detection_router.get("/{token}/get-engagement-trends")
+async def get_user_engagement_trends(
     token: str,
-    min_size: int = Query(3),
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze engagement trends"),
     response_type: ResponseType = Query(ResponseType.json),
     validator: Validator = Depends(get_validator)
 ):
-
+    """
+    Retrieves user engagement trends for a specified token over a given time period.
+    """
     query_api = TwitterFraudDetectionApi(validator)
-    data = await query_api.get_communities(token=token, min_size=min_size)
+    data = await query_api.get_user_engagement_trends(token=token, days=days)
 
     return format_response(data, response_type)
 
