@@ -22,19 +22,14 @@ class TwitterFraudDetectionApi(QueryApi):
         Retrieves engagement trends for a specified token over the last `days`.
         """
 
+        # Duration string for Cypher query
+        duration_str = f"P{days}D"
+
         # Cypher query to aggregate engagement per day for a specified token
         query = f"""
         MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
-        WITH u, t, tok, datetime({{ 
-            year: toInteger(substring(t.timestamp, 0, 4)), 
-            month: toInteger(substring(t.timestamp, 5, 2)), 
-            day: toInteger(substring(t.timestamp, 8, 2)),
-            hour: toInteger(substring(t.timestamp, 11, 2)),
-            minute: toInteger(substring(t.timestamp, 14, 2)),
-            second: toInteger(substring(t.timestamp, 17, 2))
-        }}) AS parsed_timestamp
-        WHERE parsed_timestamp >= datetime() - duration({{ days: {days} }})
-        RETURN date(parsed_timestamp) AS date, 
+        WHERE datetime(replace(t.timestamp, " ", "T")) >= datetime() - duration('{duration_str}')
+        RETURN toString(date(datetime(replace(t.timestamp, " ", "T")))) AS date, 
                COUNT(DISTINCT u.user_id) AS active_users,
                SUM(u.engagement_level) AS daily_engagement
         ORDER BY date ASC
@@ -44,7 +39,6 @@ class TwitterFraudDetectionApi(QueryApi):
         result = await self._execute_query(token, query)
 
         return result
-
     async def get_influencers(self, token: str, min_follower_count: int = 1000, limit: int = 10) -> dict:
         query = f"""
         MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
