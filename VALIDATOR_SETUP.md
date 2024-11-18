@@ -65,7 +65,7 @@ Now edit the `.env.validator.mainnet` file to set the appropriate configurations
 ```shell
 VALIDATOR_KEY=<your_validator_comx_key>
 ITERATION_INTERVAL=50
-MAX_ALLOWED_WEIGHTS=420
+MAX_ALLOWED_WEIGHTS=64
 NET_UID=22
 
 POSTGRES_DB=validator1
@@ -98,6 +98,7 @@ comx module register validator1 validator1 22 --port 9900
 
 Start required infrastructure by navigating to ops directory and running the following commands:
 ```shell
+cp ./env/.env.validator.mainnet ./ops/validator/.env
 cd ./ops/validator
 docker compose up -d
 ```
