@@ -1,4 +1,4 @@
-# Chain Insights - The validator Setup
+# Crypto Influence Insights - The validator Setup
 
 ## Table of Contents
 - [Setup](#setup)
@@ -50,7 +50,7 @@ pm2 startup
 #### Clone Repository
 
 ```shell
-git clone https://github.com/blockchain-insights/blockchain-insights-subnet.git ~/validator1
+git clone https://github.com/blockchain-insights/crypto-influence-insights.git ~/validator1
 ```
 
 #### Env configuration
@@ -64,19 +64,23 @@ cp ./env/.env.validator.example ./env/.env.validator.mainnet
 Now edit the `.env.validator.mainnet` file to set the appropriate configurations.
 ```shell
 VALIDATOR_KEY=<your_validator_comx_key>
+ITERATION_INTERVAL=50
+MAX_ALLOWED_WEIGHTS=420
+NET_UID=22
 
 POSTGRES_DB=validator1
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=changeit456$
 
-BITCOIN_NODE_RPC_URL=http://{put_proper_value_here}:{put_proper_value_here}@{put_proper_value_here}:8332
-COMMUNE_NODE_RPC=wss://api.communeai.net
-
 DATABASE_URL=postgresql+asyncpg://postgres:changeit456$@localhost:5432/validator1
+
+API_RATE_LIMIT=1000
 REDIS_URL=redis://localhost:6379/0
 
 PORT=9900
-WORKERS=4
+WORKERS=1
+
+TWITTER_BEARER_TOKENS=<you_twitter_API_bearer_tokens_separated_with_a_comma>
 ```
 
 #### Validator wallet creation
@@ -85,7 +89,7 @@ WORKERS=4
 comx key create validator1
 comx key list
 # transfer COMAI to your validator wallet for registration (aprox 10 COMAI are needed)
-comx module register validator validator 20 --port 9900
+comx module register validator1 validator1 22 --port 9900
 # stake COMAI to your validator wallet
 ```
  
