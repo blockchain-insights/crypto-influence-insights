@@ -1,9 +1,9 @@
-# Chain Insights - The Miner Setup
+# Crypto Influence Insights - The Miner Setup
 
 ## Table of Contents
 - [Setup](#setup)
-  - [Blockchain Indexer Setup](#blockchain-indexer-setup)
-    - [Bitcoin](#bitcoin-blockchain-indexer-setup)
+  - [Twitter Token Indexer Setup](#blockchain-indexer-setup)
+    - [PEPE](#bitcoin-blockchain-indexer-setup)
   - [Miner Setup](#miner-setup)
     - [Prerequisites](#prerequisites)
     - [Clone repository](#clone-repository)
@@ -14,13 +14,13 @@
 
 ## Setup
 
-### Blockchain Indexer Setup
+### Twitter Token Indexer Setup
 
-Miner requires a blockchain indexer to be able to fetch the blockchain data. The indexer should be running and accessible to the miner.
-At the moment we deliver open source version of the Bitcoin Blockchain Indexer. There is also an Ethereum Blockchain Indexer available, but it is not operational, and should be used as a reference only for building custom implementation by individual miners.
+Miner requires a twitter token indexer to be able to fetch the twitter data on a particular token (s). The indexer should be running and accessible to the miner.
+At the moment we deliver open source version of the Twitter PEPE token Indexer.
 
-#### Bitcoin Blockchain Indexer Setup
-  - [Bitcoin Blockchain Indexer](https://github.com/blockchain-insights/blockchain-insights-indexer-bitcoin)
+#### Twitter PEPE Indexer Setup
+  - [Twitter PEPE Indexer](https://github.com/blockchain-insights/crypto-influence-insights-indexer)
   
 ### Miner Setup
 
@@ -49,7 +49,7 @@ pm2 startup
 #### Clone Repository
 
 ```shell
-git clone https://github.com/blockchain-insights/blockchain-insights-subnet.git miner1
+git clone https://github.com/blockchain-insights/crypto-influence-insights.git miner1
 ```
 
 #### Env configuration
@@ -62,20 +62,15 @@ cp /env/.env.miner.example .env.miner.mainnet
 
 Now edit the `.env.miner.mainnet` file to set the appropriate configurations:
 ```shell
-NET_UID=20
+NET_UID=22
 MINER_KEY=miner1
 MINER_NAME=miner1
-NETWORK=bitcoin
+TOKEN=PEPE
 PORT=9962
-
-DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
 
 GRAPH_DATABASE_URL={put_proper_value_here}
 GRAPH_DATABASE_USER={put_proper_value_here}
 GRAPH_DATABASE_PASSWORD={put_proper_value_here}
-
-LLM_API_KEY={put_proper_value_here}
-LLM_TYPE=openai
 ```
  
 #### Miner wallet creation
@@ -84,7 +79,7 @@ LLM_TYPE=openai
 comx key create miner1
 comx key list
 # transfer COMAI to your miner wallet for registration (aprox 10 COMAI are needed)
-comx module register miner1 miner1 20 --port 9962
+comx module register miner1 miner1 22 --port 9962
 ```
 
 ### Running the miner and monitoring
