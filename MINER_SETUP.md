@@ -89,7 +89,13 @@ GRAPH_DATABASE_PASSWORD={put_proper_value_here}
 comx key create miner1
 comx key list
 # transfer COMAI to your miner wallet for registration (aprox 10 COMAI are needed)
-comx module register miner1 miner1 22 --port 9962
+comx module register miner1 miner1 22 --ip {put-here-ip-address-of-your-miner-server} --port 9962
+```
+
+If something is wrongly created, you can deregister the miner and register it again (with new settings):
+```shell
+comx module deregister miner1 22
+.. register again...
 ```
 
 ### Running the miner and monitoring
