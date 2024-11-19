@@ -100,6 +100,7 @@ Start required infrastructure by navigating to ops directory and running the fol
 ```shell
 cp ./env/.env.validator.mainnet ./ops/validator/.env
 cd ./ops/validator
+chmod 644 .env
 docker compose up -d
 ```
 
@@ -107,7 +108,7 @@ Then run the validator:
 ```shell
 # use pm2 to run the validator
 cd ~/validator1
-pm2 start ./scripts/run_validator.sh --name validator
+pm2 start ./scripts/run_validator.sh --name validator1
 pm2 save
 ```
 
