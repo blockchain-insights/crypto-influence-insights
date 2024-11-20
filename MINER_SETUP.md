@@ -2,8 +2,7 @@
 
 ## Table of Contents
 - [Setup](#setup)
-  - [Twitter Token Indexer Setup](#blockchain-indexer-setup)
-    - [PEPE](#bitcoin-blockchain-indexer-setup)
+  - [Influence Insights Indexer Setup](#influence-insights-indexer-setup)
   - [Miner Setup](#miner-setup)
     - [Prerequisites](#prerequisites)
     - [Clone repository](#clone-repository)
@@ -14,13 +13,13 @@
 
 ## Setup
 
-### Twitter Token Indexer Setup
+### Influence Insights Indexer Setup
 
-Miner requires a twitter token indexer to be able to fetch the twitter data on a particular token (s). The indexer should be running and accessible to the miner.
-At the moment we deliver open source version of the Twitter PEPE token Indexer.
+Miner requires an indexer to be able to fetch the twitter data on a particular token. The indexer should be running and accessible to the miner.
+At the moment we deliver an open source version of the Influence Insights Indexer for one token.
 
-#### Twitter PEPE Indexer Setup
-  - [Twitter PEPE Indexer](https://github.com/blockchain-insights/crypto-influence-insights-indexer)
+More info about the indexer, its code, and setup instructions can be found at:
+[Influence Insights Indexer](https://github.com/blockchain-insights/crypto-influence-insights-indexer)
   
 ### Miner Setup
 
