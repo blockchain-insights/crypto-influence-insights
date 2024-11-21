@@ -95,3 +95,21 @@ async def detect_anomalies(
     data = await query_api.get_anomalies(token=token)
 
     return format_response(data, response_type)
+
+@twitter_fraud_detection_router.get(
+    "/{token}/fetch-insightful-data",
+    summary="Fetch Insightful Data for Tweet Generation",
+    description="Fetch patterns, influencers, and anomalies for insightful Twitter bot content."
+)
+async def fetch_insightful_data(
+    token: str,
+    limit: int = Query(50, description="Number of records to return"),
+    response_type: ResponseType = Query(ResponseType.json),
+    validator: Validator = Depends(get_validator)
+):
+    """
+    Fetch patterns, influencers, and anomalies for insightful Twitter bot content.
+    """
+    query_api = TwitterFraudDetectionApi(validator)
+    data = await query_api.fetch_insightful_data(token=token, limit=limit)
+    return format_response(data, response_type)

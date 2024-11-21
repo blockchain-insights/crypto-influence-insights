@@ -168,3 +168,42 @@ class TwitterFraudDetectionApi(QueryApi):
 
         # Return the modified data with labeled anomalies
         return data
+
+    async def fetch_insightful_data(self, token: str, limit: int = 50) -> dict:
+        """
+        Fetch patterns, influencers, and anomalies for insightful Twitter bot content.
+        """
+        query = f"""
+           MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+           OPTIONAL MATCH (u)-[:LOCATED_IN]->(r:Region)
+           WITH u, t, tok, r, 
+                COUNT(t) AS tweet_count, 
+                SUM(t.likes) AS total_likes, 
+                AVG(u.engagement_level) AS avg_engagement,
+                u.follower_count AS follower_count
+           WITH u, t, tok, r, tweet_count, total_likes, avg_engagement, follower_count,
+                CASE 
+                   WHEN follower_count > 1000 AND avg_engagement < 0.1 THEN 'Low Engagement High Followers'
+                   WHEN follower_count < 500 AND avg_engagement > 0.5 THEN 'High Engagement Low Followers'
+                   ELSE 'Normal'
+                END AS anomaly_type
+           RETURN 
+               u.user_id AS user_id, 
+               u.username AS username,
+               u.follower_count AS follower_count, 
+               avg_engagement,
+               tweet_count,
+               total_likes,
+               anomaly_type,
+               r.name AS region_name,
+               COLLECT(t.text) AS recent_tweets,
+               COLLECT(t.url) AS tweet_urls
+           ORDER BY anomaly_type, total_likes DESC, avg_engagement DESC
+           LIMIT {limit}
+           """
+        try:
+            # Execute the Cypher query and fetch the result
+            data = await self.validator.query_miner(token, query=query, miner_key=None)
+            return data
+        except Exception as e:
+            raise Exception(f"Error fetching insightful data: {str(e)}")
