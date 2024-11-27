@@ -1,5 +1,7 @@
+from random import random
 from typing import Dict
 import numpy as np
+from random import choice
 import re
 from src.subnet.validator.validator import Validator
 from src.subnet.validator_api.services import QueryApi
@@ -207,3 +209,87 @@ class TwitterFraudDetectionApi(QueryApi):
             return data
         except Exception as e:
             raise Exception(f"Error fetching insightful data: {str(e)}")
+
+    async def fetch_suspicious_accounts(self, token: str, limit: int = 50) -> dict:
+        """
+        Fetch suspicious accounts with potentially unusual behavior, considering multiple categories.
+        """
+        query = f"""
+            MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+            OPTIONAL MATCH (u)-[:LOCATED_IN]->(r:Region)
+            WITH u, t, tok, r, 
+                 COUNT(t) AS tweet_count, 
+                 SUM(t.likes) AS total_likes, 
+                 AVG(u.engagement_level) AS avg_engagement,
+                 MAX(t.likes) AS max_likes,
+                 u.follower_count AS follower_count
+            WITH u, t, tok, r, tweet_count, total_likes, avg_engagement, max_likes, follower_count,
+                 COLLECT(
+                     CASE 
+                         WHEN tweet_count < 5 AND avg_engagement > 1 THEN 'Few Tweets High Engagement'
+                         ELSE NULL
+                     END
+                 ) +
+                 COLLECT(
+                     CASE 
+                         WHEN follower_count > 500 AND total_likes < 5 THEN 'High Followers Low Engagement'
+                         ELSE NULL
+                     END
+                 ) +
+                 COLLECT(
+                     CASE 
+                         WHEN r.name IS NULL THEN 'No Location Data'
+                         ELSE NULL
+                     END
+                 ) +
+                 COLLECT(
+                     CASE 
+                         WHEN u.account_age < 30 AND tweet_count > 10 THEN 'New Account Trending Activity'
+                         ELSE NULL
+                     END
+                 ) +
+                 COLLECT(
+                     CASE
+                         WHEN follower_count > 1000 AND tweet_count < 3 THEN 'High Followers Few Tweets'
+                         ELSE NULL
+                     END
+                 ) AS suspicious_types
+            RETURN 
+                u.user_id AS user_id,
+                u.username AS username,
+                u.follower_count AS follower_count,
+                avg_engagement,
+                tweet_count,
+                total_likes,
+                max_likes,
+                suspicious_types,
+                r.name AS region_name,
+                COLLECT(t.text) AS recent_tweets,
+                COLLECT(t.url) AS tweet_urls
+            ORDER BY total_likes DESC, avg_engagement DESC
+            LIMIT {limit}
+        """
+        try:
+            # Execute the Cypher query and fetch the result
+            data = await self.validator.query_miner(
+                token=token,
+                query=query,
+                miner_key=None
+            )
+
+            # Post-processing: Highlight accounts in multiple categories
+            for account in data.get("results", []):
+                suspicious_types = account.get("suspicious_types", [])
+                if len(suspicious_types) > 1:
+                    # Randomly pick one category to highlight
+                    account["highlighted_type"] = choice(suspicious_types)
+                elif suspicious_types:
+                    # Single suspicious type
+                    account["highlighted_type"] = suspicious_types[0]
+                else:
+                    # Default to "Normal" if no suspicious types are found
+                    account["highlighted_type"] = "Normal"
+
+            return data
+        except Exception as e:
+            raise Exception(f"Error fetching suspicious accounts: {str(e)}")
