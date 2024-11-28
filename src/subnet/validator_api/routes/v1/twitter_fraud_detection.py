@@ -97,38 +97,19 @@ async def detect_anomalies(
     return format_response(data, response_type)
 
 @twitter_fraud_detection_router.get(
-    "/{token}/fetch-insightful-data",
-    summary="Fetch Insightful Data for Tweet Generation",
-    description="Fetch patterns, influencers, and anomalies for insightful Twitter bot content."
+    "/{token}/fetch-account-analysis",
+    summary="Fetch Account Analysis for Twitter Bot Content",
+    description="Fetch account analysis, including patterns, influencers, anomalies, and suspicious accounts for Twitter bot content generation."
 )
-async def fetch_insightful_data(
+async def fetch_account_analysis(
     token: str,
     limit: int = Query(50, description="Number of records to return"),
     response_type: ResponseType = Query(ResponseType.json),
     validator: Validator = Depends(get_validator)
 ):
     """
-    Fetch patterns, influencers, and anomalies for insightful Twitter bot content.
+    Fetch account analysis, including patterns, influencers, anomalies, and suspicious accounts.
     """
     query_api = TwitterFraudDetectionApi(validator)
-    data = await query_api.fetch_insightful_data(token=token, limit=limit)
-    return format_response(data, response_type)
-
-
-@twitter_fraud_detection_router.get(
-    "/{token}/fetch-suspicious-accounts",
-    summary="Fetch Suspicious Accounts",
-    description="Fetch suspicious accounts with potentially unusual behaviors for Twitter bot analysis."
-)
-async def fetch_suspicious_accounts(
-    token: str,
-    limit: int = Query(50, description="Number of records to return"),
-    response_type: ResponseType = Query(ResponseType.json),
-    validator: Validator = Depends(get_validator)
-):
-    """
-    Fetch suspicious accounts with potentially unusual behaviors for Twitter bot analysis.
-    """
-    query_api = TwitterFraudDetectionApi(validator)
-    data = await query_api.fetch_suspicious_accounts(token=token, limit=limit)
+    data = await query_api.fetch_account_analysis(token=token, limit=limit)
     return format_response(data, response_type)

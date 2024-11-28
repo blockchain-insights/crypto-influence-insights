@@ -171,59 +171,33 @@ class TwitterFraudDetectionApi(QueryApi):
         # Return the modified data with labeled anomalies
         return data
 
-    async def fetch_insightful_data(self, token: str, limit: int = 50) -> dict:
+    async def fetch_account_analysis(self, token: str, limit: int = 50) -> dict:
         """
-        Fetch patterns, influencers, and anomalies for insightful Twitter bot content.
-        """
-        query = f"""
-           MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
-           OPTIONAL MATCH (u)-[:LOCATED_IN]->(r:Region)
-           WITH u, t, tok, r, 
-                COUNT(t) AS tweet_count, 
-                SUM(t.likes) AS total_likes, 
-                AVG(u.engagement_level) AS avg_engagement,
-                u.follower_count AS follower_count
-           WITH u, t, tok, r, tweet_count, total_likes, avg_engagement, follower_count,
-                CASE 
-                   WHEN follower_count > 1000 AND avg_engagement < 0.1 THEN 'Low Engagement High Followers'
-                   WHEN follower_count < 500 AND avg_engagement > 0.5 THEN 'High Engagement Low Followers'
-                   ELSE 'Normal'
-                END AS anomaly_type
-           RETURN 
-               u.user_id AS user_id, 
-               u.username AS username,
-               u.follower_count AS follower_count, 
-               avg_engagement,
-               tweet_count,
-               total_likes,
-               anomaly_type,
-               r.name AS region_name,
-               COLLECT(t.text) AS recent_tweets,
-               COLLECT(t.url) AS tweet_urls
-           ORDER BY anomaly_type, total_likes DESC, avg_engagement DESC
-           LIMIT {limit}
-           """
-        try:
-            # Execute the Cypher query and fetch the result
-            data = await self.validator.query_miner(token, query=query, miner_key=None)
-            return data
-        except Exception as e:
-            raise Exception(f"Error fetching insightful data: {str(e)}")
-
-    async def fetch_suspicious_accounts(self, token: str, limit: int = 50) -> dict:
-        """
-        Fetch suspicious accounts with potentially unusual behavior, considering multiple categories.
+        Fetch account analysis, including patterns, influencers, anomalies, and suspicious accounts,
+        skipping records without anomalies and allowing empty regions.
         """
         query = f"""
             MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
             OPTIONAL MATCH (u)-[:LOCATED_IN]->(r:Region)
-            WITH u, t, tok, r, 
-                 COUNT(t) AS tweet_count, 
-                 SUM(t.likes) AS total_likes, 
+            WITH u, t, tok, r,
+                 u.total_tweets AS tweet_count,
+                 SUM(t.likes) AS total_likes,
                  AVG(u.engagement_level) AS avg_engagement,
                  MAX(t.likes) AS max_likes,
                  u.follower_count AS follower_count
             WITH u, t, tok, r, tweet_count, total_likes, avg_engagement, max_likes, follower_count,
+                 COLLECT(
+                     CASE 
+                         WHEN follower_count > 1000 AND avg_engagement < 0.1 THEN 'Low Engagement High Followers'
+                         ELSE NULL
+                     END
+                 ) +
+                 COLLECT(
+                     CASE 
+                         WHEN follower_count < 500 AND avg_engagement > 0.5 THEN 'High Engagement Low Followers'
+                         ELSE NULL
+                     END
+                 ) +
                  COLLECT(
                      CASE 
                          WHEN tweet_count < 5 AND avg_engagement > 1 THEN 'Few Tweets High Engagement'
@@ -238,12 +212,6 @@ class TwitterFraudDetectionApi(QueryApi):
                  ) +
                  COLLECT(
                      CASE 
-                         WHEN r.name IS NULL THEN 'No Location Data'
-                         ELSE NULL
-                     END
-                 ) +
-                 COLLECT(
-                     CASE 
                          WHEN u.account_age < 30 AND tweet_count > 10 THEN 'New Account Trending Activity'
                          ELSE NULL
                      END
@@ -253,7 +221,8 @@ class TwitterFraudDetectionApi(QueryApi):
                          WHEN follower_count > 1000 AND tweet_count < 3 THEN 'High Followers Few Tweets'
                          ELSE NULL
                      END
-                 ) AS suspicious_types
+                 ) AS anomaly_types
+            WHERE SIZE([anomaly IN anomaly_types WHERE anomaly IS NOT NULL]) > 0
             RETURN 
                 u.user_id AS user_id,
                 u.username AS username,
@@ -262,7 +231,7 @@ class TwitterFraudDetectionApi(QueryApi):
                 tweet_count,
                 total_likes,
                 max_likes,
-                suspicious_types,
+                anomaly_types,
                 r.name AS region_name,
                 COLLECT(t.text) AS recent_tweets,
                 COLLECT(t.url) AS tweet_urls
@@ -277,19 +246,16 @@ class TwitterFraudDetectionApi(QueryApi):
                 miner_key=None
             )
 
-            # Post-processing: Highlight accounts in multiple categories
+            # Post-processing: Add highlighted anomalies
             for account in data.get("results", []):
-                suspicious_types = account.get("suspicious_types", [])
-                if len(suspicious_types) > 1:
-                    # Randomly pick one category to highlight
-                    account["highlighted_type"] = choice(suspicious_types)
-                elif suspicious_types:
-                    # Single suspicious type
-                    account["highlighted_type"] = suspicious_types[0]
-                else:
-                    # Default to "Normal" if no suspicious types are found
-                    account["highlighted_type"] = "Normal"
+                anomaly_types = account.get("anomaly_types", [])
+                if len(anomaly_types) > 1:
+                    # Highlight one random anomaly
+                    account["highlighted_anomaly"] = choice(anomaly_types)
+                elif anomaly_types:
+                    # Single anomaly
+                    account["highlighted_anomaly"] = anomaly_types[0]
 
             return data
         except Exception as e:
-            raise Exception(f"Error fetching suspicious accounts: {str(e)}")
+            raise Exception(f"Error fetching account analysis: {str(e)}")
