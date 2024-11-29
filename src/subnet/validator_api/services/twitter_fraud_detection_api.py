@@ -173,7 +173,8 @@ class TwitterFraudDetectionApi(QueryApi):
 
     async def fetch_account_analysis(self, token: str, limit: int = 50) -> dict:
         """
-        Fetch account analysis with user classifications flattened directly in the query.
+        Fetch account analysis with user classifications flattened directly in the query,
+        including the most recent tweet text for each user.
         """
         query = f"""
             MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
@@ -183,8 +184,9 @@ class TwitterFraudDetectionApi(QueryApi):
                  SUM(t.likes) AS total_likes,
                  AVG(u.engagement_level) AS avg_engagement,
                  MAX(t.likes) AS max_likes,
-                 u.follower_count AS follower_count
-            WITH u, r, tweet_count, total_likes, avg_engagement, max_likes, follower_count,
+                 u.follower_count AS follower_count,
+                 t.text AS tweet_text
+            WITH u, r, tweet_text, tweet_count, total_likes, avg_engagement, max_likes, follower_count,
                  CASE 
                      WHEN follower_count > 10000 AND avg_engagement / follower_count < 0.001 THEN 'High Followers Low Engagement'
                      WHEN follower_count < 1000 AND avg_engagement / follower_count > 0.1 THEN 'Low Followers High Engagement'
@@ -195,7 +197,7 @@ class TwitterFraudDetectionApi(QueryApi):
                      ELSE NULL
                  END AS user_classification
             WHERE user_classification IS NOT NULL
-            WITH user_classification, u, r, tweet_count, total_likes, avg_engagement, max_likes, follower_count
+            WITH user_classification, u, r, tweet_text, tweet_count, total_likes, avg_engagement, max_likes, follower_count
             ORDER BY user_classification, follower_count DESC
             WITH user_classification, COLLECT({{
                 user_id: u.user_id,
@@ -205,7 +207,8 @@ class TwitterFraudDetectionApi(QueryApi):
                 tweet_count: tweet_count,
                 total_likes: total_likes,
                 max_likes: max_likes,
-                region_name: r.name
+                region_name: r.name,
+                tweet_text: tweet_text
             }})[0..{limit}] AS users_per_class
             UNWIND users_per_class AS user
             RETURN 
@@ -217,7 +220,8 @@ class TwitterFraudDetectionApi(QueryApi):
                 user.tweet_count AS tweet_count,
                 user.total_likes AS total_likes,
                 user.max_likes AS max_likes,
-                user.region_name AS region_name
+                user.region_name AS region_name,
+                user.tweet_text AS tweet_text
             ORDER BY user_classification, follower_count DESC
         """
         try:
