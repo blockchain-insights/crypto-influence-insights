@@ -173,8 +173,7 @@ class TwitterFraudDetectionApi(QueryApi):
 
     async def fetch_account_analysis(self, token: str, limit: int = 50) -> dict:
         """
-        Fetch account analysis, including patterns, influencers, anomalies, and suspicious accounts,
-        skipping records without anomalies and allowing empty regions.
+        Fetch account analysis with user classifications flattened directly in the query.
         """
         query = f"""
             MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
@@ -185,77 +184,49 @@ class TwitterFraudDetectionApi(QueryApi):
                  AVG(u.engagement_level) AS avg_engagement,
                  MAX(t.likes) AS max_likes,
                  u.follower_count AS follower_count
-            WITH u, t, tok, r, tweet_count, total_likes, avg_engagement, max_likes, follower_count,
-                 COLLECT(
-                     CASE 
-                         WHEN follower_count > 1000 AND avg_engagement < 0.1 THEN 'Low Engagement High Followers'
-                         ELSE NULL
-                     END
-                 ) +
-                 COLLECT(
-                     CASE 
-                         WHEN follower_count < 500 AND avg_engagement > 0.5 THEN 'High Engagement Low Followers'
-                         ELSE NULL
-                     END
-                 ) +
-                 COLLECT(
-                     CASE 
-                         WHEN tweet_count < 5 AND avg_engagement > 1 THEN 'Few Tweets High Engagement'
-                         ELSE NULL
-                     END
-                 ) +
-                 COLLECT(
-                     CASE 
-                         WHEN follower_count > 500 AND total_likes < 5 THEN 'High Followers Low Engagement'
-                         ELSE NULL
-                     END
-                 ) +
-                 COLLECT(
-                     CASE 
-                         WHEN u.account_age < 30 AND tweet_count > 10 THEN 'New Account Trending Activity'
-                         ELSE NULL
-                     END
-                 ) +
-                 COLLECT(
-                     CASE
-                         WHEN follower_count > 1000 AND tweet_count < 3 THEN 'High Followers Few Tweets'
-                         ELSE NULL
-                     END
-                 ) AS anomaly_types
-            WHERE SIZE([anomaly IN anomaly_types WHERE anomaly IS NOT NULL]) > 0
+            WITH u, r, tweet_count, total_likes, avg_engagement, max_likes, follower_count,
+                 CASE 
+                     WHEN follower_count > 10000 AND avg_engagement / follower_count < 0.001 THEN 'High Followers Low Engagement'
+                     WHEN follower_count < 1000 AND avg_engagement / follower_count > 0.1 THEN 'Low Followers High Engagement'
+                     WHEN tweet_count > 10000 AND avg_engagement / tweet_count < 0.01 THEN 'High Tweets Low Engagement'
+                     WHEN tweet_count < 100 AND avg_engagement / tweet_count > 0.1 THEN 'Low Tweets High Engagement'
+                     WHEN follower_count > 10000 AND tweet_count < 100 THEN 'High Followers Few Tweets'
+                     WHEN tweet_count > 10000 AND follower_count < 1000 THEN 'High Tweets Few Followers'
+                     ELSE NULL
+                 END AS user_classification
+            WHERE user_classification IS NOT NULL
+            WITH user_classification, u, r, tweet_count, total_likes, avg_engagement, max_likes, follower_count
+            ORDER BY user_classification, follower_count DESC
+            WITH user_classification, COLLECT({{
+                user_id: u.user_id,
+                username: u.username,
+                follower_count: follower_count,
+                avg_engagement: avg_engagement,
+                tweet_count: tweet_count,
+                total_likes: total_likes,
+                max_likes: max_likes,
+                region_name: r.name
+            }})[0..{limit}] AS users_per_class
+            UNWIND users_per_class AS user
             RETURN 
-                u.user_id AS user_id,
-                u.username AS username,
-                u.follower_count AS follower_count,
-                avg_engagement,
-                tweet_count,
-                total_likes,
-                max_likes,
-                anomaly_types,
-                r.name AS region_name,
-                COLLECT(t.text) AS recent_tweets,
-                COLLECT(t.url) AS tweet_urls
-            ORDER BY total_likes DESC, avg_engagement DESC
-            LIMIT {limit}
+                user_classification,
+                user.user_id AS user_id,
+                user.username AS username,
+                user.follower_count AS follower_count,
+                user.avg_engagement AS avg_engagement,
+                user.tweet_count AS tweet_count,
+                user.total_likes AS total_likes,
+                user.max_likes AS max_likes,
+                user.region_name AS region_name
+            ORDER BY user_classification, follower_count DESC
         """
         try:
             # Execute the Cypher query and fetch the result
-            data = await self.validator.query_miner(
+            return await self.validator.query_miner(
                 token=token,
                 query=query,
                 miner_key=None
             )
 
-            # Post-processing: Add highlighted anomalies
-            for account in data.get("results", []):
-                anomaly_types = account.get("anomaly_types", [])
-                if len(anomaly_types) > 1:
-                    # Highlight one random anomaly
-                    account["highlighted_anomaly"] = choice(anomaly_types)
-                elif anomaly_types:
-                    # Single anomaly
-                    account["highlighted_anomaly"] = anomaly_types[0]
-
-            return data
         except Exception as e:
             raise Exception(f"Error fetching account analysis: {str(e)}")

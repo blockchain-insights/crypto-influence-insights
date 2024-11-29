@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from loguru import logger
 from neo4j import WRITE_ACCESS, GraphDatabase
 from neo4j.exceptions import Neo4jError
+from neo4j.graph import Node, Relationship
 
 
 class GraphSearch:
@@ -28,12 +29,9 @@ class GraphSearch:
         )
 
     def execute_query(self, query: str):
-        # Convert query to uppercase for case-insensitive validation
         query_upper = query.upper().strip()
 
-        # Check for any disallowed modification commands
         if any(clause in query_upper for clause in self.MODIFICATION_CLAUSES):
-            # Allow only specific GDS commands by checking if the query contains an allowed GDS command
             if not any(command in query_upper for command in self.ALLOWED_GDS_COMMANDS):
                 raise ValueError(
                     "Modification queries are not allowed. Only GDS project/drop and read-only queries are permitted."
@@ -41,36 +39,28 @@ class GraphSearch:
 
         with self.driver.session(default_access_mode=WRITE_ACCESS) as session:
             try:
+                print("Executing query:", query)
                 result = session.run(query)
 
-                # If no results are found, return an empty list
-                if not result:
+                raw_data = result.data()
+                print("Raw result:", raw_data)
+
+                if not raw_data:
                     return []
 
                 results_data = []
-
-                # Iterate through the query result
-                for record in result:
+                for record in raw_data:  # Directly iterate over raw_data
                     processed_record = {}
-
-                    # Iterate over the key-value pairs in each record
-                    for key in record.keys():
-                        value = record[key]
-
+                    for key, value in record.items():
                         if value is None:
-                            # Handle null values gracefully
                             processed_record[key] = None
-
-                        # Process nodes
-                        elif hasattr(value, "id") and hasattr(value, "labels"):
+                        elif isinstance(value, Node):
                             processed_record[key] = {
                                 "id": value.id,
                                 "labels": list(value.labels),
                                 "properties": dict(value),
                             }
-
-                        # Process relationships
-                        elif hasattr(value, "id") and hasattr(value, "type"):
+                        elif isinstance(value, Relationship):
                             processed_record[key] = {
                                 "id": value.id,
                                 "start": value.start_node.id,
@@ -78,8 +68,6 @@ class GraphSearch:
                                 "label": value.type,
                                 "properties": dict(value),
                             }
-
-                        # Handle primitive or other values
                         else:
                             processed_record[key] = value
 
@@ -88,7 +76,7 @@ class GraphSearch:
                 return results_data
 
             except Neo4jError as e:
-                raise ValueError(e.message)
+                raise ValueError(f"Error executing query: {e.message}")
 
     def solve_twitter_challenge(self, token: str) -> Optional[Dict]:
         start_time = time.time()
