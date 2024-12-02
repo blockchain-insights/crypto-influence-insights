@@ -46,6 +46,7 @@ class Validator(Module):
             twitter_service: TwitterService,
             query_timeout: int = 60,
             challenge_timeout: int = 60,
+            snapshot_timeout: int = 60
 
     ) -> None:
         super().__init__()
@@ -56,6 +57,7 @@ class Validator(Module):
         self.netuid = netuid
         self.challenge_timeout = challenge_timeout
         self.query_timeout = query_timeout
+        self.snapshot_timeout = snapshot_timeout
         self.weights_storage = weights_storage
         self.miner_discovery_manager = miner_discovery_manager
         self.tweet_cache_manager = tweet_cache_manager
@@ -482,6 +484,74 @@ class Validator(Module):
                 "response": random_response
             }
 
+    async def fetch_snapshot(self, token: str, from_date: str, to_date: str, miner_key: Optional[str]) -> dict:
+        """
+        Fetches a snapshot from one or more miners for a given token and date range.
+
+        Args:
+            token (str): The token name to filter by.
+            from_date (str): Start date for filtering (YYYY-MM-DD).
+            to_date (str): End date for filtering (YYYY-MM-DD).
+            miner_key (Optional[str]): Specific miner key to query. If None, multiple miners are sampled.
+
+        Returns:
+            dict: Snapshot results with metadata.
+        """
+        request_id = str(uuid.uuid4())
+        timestamp = datetime.utcnow()
+
+        if miner_key:
+            miner = await self.miner_discovery_manager.get_miner_by_key(miner_key, token)
+            if not miner:
+                return {
+                    "request_id": request_id,
+                    "timestamp": timestamp,
+                    "miner_keys": None,
+                    "token": token,
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "response": []
+                }
+
+            response = await self._get_snapshot(miner, token, from_date, to_date)
+
+            return {
+                "request_id": request_id,
+                "timestamp": timestamp,
+                "miner_keys": [miner_key],
+                "token": token,
+                "from_date": from_date,
+                "to_date": to_date,
+                "response": response
+            }
+        else:
+            select_count = 3
+            sample_size = 16
+            miners = await self.miner_discovery_manager.get_miners_by_token(token)
+
+            if len(miners) < 3:
+                top_miners = miners
+            else:
+                top_miners = random.sample(miners[:sample_size], select_count)
+
+            snapshot_tasks = []
+            for miner in top_miners:
+                snapshot_tasks.append(self._get_snapshot(miner, token, from_date, to_date))
+
+            responses = await asyncio.gather(*snapshot_tasks)
+            combined_responses = list(zip(top_miners, responses))
+            miner, random_response = random.choice(combined_responses)
+
+            return {
+                "request_id": request_id,
+                "timestamp": timestamp,
+                "miner_keys": [miner['miner_key'] for miner in top_miners],
+                "token": token,
+                "from_date": from_date,
+                "to_date": to_date,
+                "response": random_response
+            }
+
     async def _query_miner(self, miner, query):
         miner_key = miner['miner_key']
         module_ip = miner['miner_address']
@@ -500,4 +570,42 @@ class Validator(Module):
             return query_result
         except Exception as e:
             logger.warning(f"Failed to query miner", error=e, miner_key=miner_key)
+            return None
+
+    async def _get_snapshot(self, miner, token: str, from_date: str, to_date: str):
+        """
+        Calls the miner's export_snapshot endpoint to fetch a snapshot.
+
+        Args:
+            miner (dict): Dictionary containing miner information (key, address, port).
+            token (str): The token name to filter by.
+            from_date (str): Start date for filtering (YYYY-MM-DD).
+            to_date (str): End date for filtering (YYYY-MM-DD).
+
+        Returns:
+            dict: A dictionary with snapshot details, or None in case of failure.
+        """
+        miner_key = miner['miner_key']
+        module_ip = miner['miner_address']
+        module_port = int(miner['miner_ip_port'])
+        module_client = ModuleClient(module_ip, module_port, self.key)
+
+        try:
+            snapshot_result = await module_client.call(
+                "export_snapshot",
+                miner_key,
+                {
+                    "token": token,
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "validator_key": self.key.ss58_address,
+                },
+                timeout=self.snapshot_timeout,
+            )
+            if not snapshot_result:
+                return None
+
+            return snapshot_result
+        except Exception as e:
+            logger.warning(f"Failed to fetch snapshot from miner", error=e, miner_key=miner_key)
             return None

@@ -8,6 +8,7 @@ from src.subnet.validator_api import patch_record, miner_discovery_manager, sett
 from src.subnet.validator_api.rate_limiter import RateLimiterMiddleware
 from src.subnet.validator_api.routes.v1.twitter_fraud_detection import twitter_fraud_detection_router
 from src.subnet.validator_api.routes.v1.miner_receipts import miner_router
+from src.subnet.validator_api.routes.v1.snapshots import snapshot_router
 
 logger.remove()
 logger.add(
@@ -32,6 +33,7 @@ app = FastAPI(
 
 app.include_router(twitter_fraud_detection_router)
 app.include_router(miner_router)
+app.include_router(snapshot_router)
 app.add_middleware(RateLimiterMiddleware, redis_url=settings.REDIS_URL, max_requests=settings.API_RATE_LIMIT,
                    window_seconds=60)
 

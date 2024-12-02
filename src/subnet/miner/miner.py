@@ -6,13 +6,16 @@ from communex._common import get_node_url
 from communex.client import CommuneClient
 from communex.module import Module, endpoint
 from communex.module._rate_limiters.limiters import IpLimiterParams
+from helpers.file_utils import save_to_file
+from helpers.cypher_utils import generate_cypher_from_results
 from keylimiter import TokenBucketLimiter
 from loguru import logger
 from starlette.middleware.cors import CORSMiddleware
 from src.subnet import VERSION
 from src.subnet.miner._config import MinerSettings, load_environment
-from src.subnet.miner import GraphSearch
+from src.subnet.miner.graph_search import GraphSearch
 from src.subnet.protocol import TwitterChallenge
+
 
 
 class Miner(Module):
@@ -102,6 +105,46 @@ class Miner(Module):
                 f"No matching tweet or user found for the Twitter verification challenge with token {challenge.token}")
 
         return challenge
+
+    @endpoint
+    async def export_snapshot(self, token: str, from_date: str, to_date: str) -> dict:
+        """
+        Exports a snapshot of the database for a specific token and date range.
+        Args:
+            token (str): The token name to filter by.
+            from_date (str): Start date for filtering (YYYY-MM-DD).
+            to_date (str): End date for filtering (YYYY-MM-DD).
+
+        Returns:
+            dict: A downloadable link or raw Cypher export string.
+        """
+        try:
+            # Adjusted query to handle timestamp format correctly
+            query = f"""
+                MATCH (t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+                WHERE datetime(replace(t.timestamp, " ", "T")) >= datetime('{from_date}')
+                  AND datetime(replace(t.timestamp, " ", "T")) <= datetime('{to_date}')
+                MATCH (u:UserAccount)-[:POSTED]->(t)
+                MATCH (u)-[:LOCATED_IN]->(r)
+                RETURN t, tok, u, r
+            """
+
+            # Execute the query
+            results = self.graph_search.execute_query(query)
+
+            # Generate Cypher export from results
+            cypher_export = generate_cypher_from_results(results)
+
+            # Save the generated Cypher to a file
+            filename = f"snapshot_{token}_{from_date}_to_{to_date}.cypher"
+            filepath = save_to_file(cypher_export, filename)
+
+            # Return success response with download link
+            return {"message": "Snapshot generated successfully", "download_link": filepath}
+        except Exception as e:
+            logger.error(f"Error generating snapshot: {str(e)}")
+            return {"error": str(e)}
+
 
 if __name__ == "__main__":
     from communex.module.server import ModuleServer

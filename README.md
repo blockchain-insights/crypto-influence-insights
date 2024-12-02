@@ -31,30 +31,34 @@ The Crypto Influence Insights Subnet is designed to:
 
 The subnet builds upon the legacy of blockchain data analysis while focusing on token-specific insights and detection of scam patterns.
 
-## Roadmap
+# **Roadmap**
 
-### V1
-- **Basic Subnet Functionality:** Scraping data for a single token and providing essential endpoints for token influencers.
-- **Key Deliverables:** APIs for influencer metrics, graphs, and rankings.
+## **V1**
+- **Basic Subnet Functionality**: Develop the ability to scrape data for a single token and provide essential endpoints for token influencer analysis.
+- **Key Deliverables**: APIs for influencer metrics, graph generation, and influencer rankings.
 
-### V1.1
-- **Adaptation and Polishing:** Refining endpoints based on real-world scenarios.
+## **V1.1**
+- **Twitter Presence**: Introduce a new endpoint and build a Twitter bot to classify influencers by detecting anomalies.
 
-### V2
-- **Multi-Token Insights:** Expanding subnet functionality to scrape data for multiple tokens and querying across tokens.
-- **Scam Detection:** Introducing basic scam detection capabilities.
+## **V2**
+- **Snapshot Creation**: Implement an endpoint and the underlying functionality for creating miner database snapshots (Proof of Concept).
+- **Data Merging Across Miners**: Develop an approach to merge datasets from multiple miners over time, including new endpoints, functionality, and supporting infrastructure (DevOps).
+- **Multi-Token Insights**: Expand subnet functionality to query merged datasets for insights across multiple tokens.
 
-### V2.1
-- **Visualization Dashboard:** Providing a dashboard for visualizing token insights and scam detection results.
+## **V3**
+- **Advanced Influencer Detection**: Enhance influencer detection capabilities with new APIs and algorithms (e.g., PageRank, Leiden, Louvain, vector search).
+- **Advanced Scam Detection**: Develop advanced APIs and algorithms for scam detection (e.g., PageRank, Leiden, Louvain, vector search).
 
-### V3
-- **Advanced Scam Detection:** Enhancing detection capabilities with advanced patterns and APIs.
+> *Note*: Both **Advanced Influencer Detection** and **Advanced Scam Detection** will focus on identifying coordinated campaigns, including promoting or anti-promoting tokens, detecting scam groups, and exposing associated accounts.
 
-### V4
-- **Collaborative Validation:** Merging results from different miners and improving validation techniques.
+## **V4**
+- **Visualization Dashboard**: Create a user-friendly dashboard to visualize results from the APIs.
+- **Jupyter Notebooks**: Develop Jupyter notebooks with examples of API and data usage, including graphs and reusable code templates, and host a repository with essential templates.
 
-### V5
-- **Full-Scale API:** Offering a comprehensive scam and influencer detection API for real-time apps and agencies.
+## **V5**
+- **Adding LLM Capabilities to Influencer/Scam Detection**: Introduce prompts to detect various classes of influencers and scams more efficiently, with fuzzy thresholds and support for complex patterns.
+- **Dedicated Models for Influencer/Scam Detection**: Train dedicated LLM models (at the miner level) for improved detection of influencers and scams.
+
 
 ## Overview
 
