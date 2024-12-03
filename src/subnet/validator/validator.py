@@ -501,6 +501,7 @@ class Validator(Module):
         timestamp = datetime.utcnow()
 
         if miner_key:
+            # Fetch snapshot from a specific miner
             miner = await self.miner_discovery_manager.get_miner_by_key(miner_key, token)
             if not miner:
                 return {
@@ -522,25 +523,56 @@ class Validator(Module):
                 "token": token,
                 "from_date": from_date,
                 "to_date": to_date,
-                "response": response
+                "response": response or {"error": "Snapshot generation failed"}
             }
+
         else:
+            # Fetch snapshot from multiple miners
             select_count = 3
             sample_size = 16
             miners = await self.miner_discovery_manager.get_miners_by_token(token)
 
-            if len(miners) < 3:
+            if not miners:
+                return {
+                    "request_id": request_id,
+                    "timestamp": timestamp,
+                    "miner_keys": None,
+                    "token": token,
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "response": {"error": "No miners available for the token"}
+                }
+
+            if len(miners) < select_count:
                 top_miners = miners
             else:
                 top_miners = random.sample(miners[:sample_size], select_count)
 
-            snapshot_tasks = []
-            for miner in top_miners:
-                snapshot_tasks.append(self._get_snapshot(miner, token, from_date, to_date))
-
+            snapshot_tasks = [self._get_snapshot(miner, token, from_date, to_date) for miner in top_miners]
             responses = await asyncio.gather(*snapshot_tasks)
+
+            # Combine miners with their responses
             combined_responses = list(zip(top_miners, responses))
-            miner, random_response = random.choice(combined_responses)
+
+            # Filter out failed responses (None)
+            successful_responses = [resp for miner, resp in combined_responses if resp is not None]
+
+            if not successful_responses:
+                # If no successful responses, return an error
+                return {
+                    "request_id": request_id,
+                    "timestamp": timestamp,
+                    "miner_keys": [miner['miner_key'] for miner in top_miners],
+                    "token": token,
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "response": {"error": "All snapshot requests failed"}
+                }
+
+            # Randomly select a successful response
+            miner, random_response = random.choice([
+                (miner, resp) for miner, resp in combined_responses if resp is not None
+            ])
 
             return {
                 "request_id": request_id,

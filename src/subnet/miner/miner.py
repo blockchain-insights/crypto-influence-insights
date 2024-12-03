@@ -119,13 +119,14 @@ class Miner(Module):
             dict: A downloadable link or raw Cypher export string.
         """
         try:
-            # Adjusted query to handle timestamp format correctly
+            # Adjusted query to include MENTIONS relationship
             query = f"""
                 MATCH (t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
                 WHERE datetime(replace(t.timestamp, " ", "T")) >= datetime('{from_date}')
                   AND datetime(replace(t.timestamp, " ", "T")) <= datetime('{to_date}')
-                MATCH (u:UserAccount)-[:POSTED]->(t)
-                MATCH (u)-[:LOCATED_IN]->(r)
+                OPTIONAL MATCH (u:UserAccount)-[:POSTED]->(t)
+                OPTIONAL MATCH (u)-[:LOCATED_IN]->(r)
+                OPTIONAL MATCH (u)-[:MENTIONS]->(tok)
                 RETURN t, tok, u, r
             """
 
