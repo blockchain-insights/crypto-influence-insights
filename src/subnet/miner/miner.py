@@ -1,3 +1,4 @@
+import os
 import signal
 from datetime import datetime
 from typing import Dict, Optional
@@ -116,10 +117,14 @@ class Miner(Module):
             to_date (str): End date for filtering (YYYY-MM-DD).
 
         Returns:
-            dict: A downloadable link or raw Cypher export string.
+            dict: A downloadable link to the snapshot file.
         """
         try:
-            # Adjusted query to include MENTIONS relationship
+            # Define the file name and path
+            filename = f"snapshot_{token}_{from_date}_to_{to_date}.cypher"
+            file_path = os.path.join("./snapshot", filename)
+
+            # Query to filter the required data
             query = f"""
                 MATCH (t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
                 WHERE datetime(replace(t.timestamp, " ", "T")) >= datetime('{from_date}')
@@ -130,20 +135,23 @@ class Miner(Module):
                 RETURN t, tok, u, r
             """
 
-            # Execute the query
-            results = self.graph_search.execute_query(query)
+            # Export the query results to a Cypher file
+            apoc_query = r"""
+                CALL apoc.export.cypher.query(
+                    "{query.replace('"', '\\"')}",
+                    "{file_path}",
+                    {{
+                        format: "cypher",
+                        cypherFormat: "create"
+                    }}
+                )
+            """
+            self.graph_search.execute_query(apoc_query)
 
-            # Generate Cypher export from results
-            cypher_export = generate_cypher_from_results(results)
-
-            # Save the generated Cypher to a file
-            filename = f"snapshot_{token}_{from_date}_to_{to_date}.cypher"
-            filepath = save_to_file(cypher_export, filename)
-
-            # Return success response with download link
-            return {"message": "Snapshot generated successfully", "download_link": filepath}
+            # Return success response with file path
+            return {"message": "Snapshot exported successfully", "download_link": file_path}
         except Exception as e:
-            logger.error(f"Error generating snapshot: {str(e)}")
+            logger.error(f"Error exporting snapshot: {str(e)}")
             return {"error": str(e)}
 
 
