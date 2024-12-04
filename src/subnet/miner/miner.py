@@ -109,47 +109,55 @@ class Miner(Module):
 
     @endpoint
     async def export_snapshot(self, token: str, from_date: str, to_date: str) -> dict:
-        """
-        Exports a snapshot of the database for a specific token and date range.
-        Args:
-            token (str): The token name to filter by.
-            from_date (str): Start date for filtering (YYYY-MM-DD).
-            to_date (str): End date for filtering (YYYY-MM-DD).
-
-        Returns:
-            dict: A downloadable link to the snapshot file.
-        """
         try:
-            # Define the file name and path
-            filename = f"snapshot_{token}_{from_date}_to_{to_date}.cypher"
-            file_path = os.path.join("./snapshot", filename)
-
-            # Query to filter the required data
+            # Properly formatted Cypher query
             query = f"""
-                MATCH (t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
-                WHERE datetime(replace(t.timestamp, " ", "T")) >= datetime('{from_date}')
-                  AND datetime(replace(t.timestamp, " ", "T")) <= datetime('{to_date}')
-                OPTIONAL MATCH (u:UserAccount)-[:POSTED]->(t)
-                OPTIONAL MATCH (u)-[:LOCATED_IN]->(r)
-                OPTIONAL MATCH (u)-[:MENTIONS]->(tok)
-                RETURN t, tok, u, r
+            MATCH (t:Tweet)<-[mentioned_in:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+            WHERE datetime(replace(t.timestamp, ' ', 'T')) >= datetime('{from_date}')
+              AND datetime(replace(t.timestamp, ' ', 'T')) <= datetime('{to_date}')
+            OPTIONAL MATCH (u:UserAccount)-[posted:POSTED]->(t)
+            OPTIONAL MATCH (u)-[located_in:LOCATED_IN]->(r)
+            OPTIONAL MATCH (u)-[mentions:MENTIONS]->(tok)
+            RETURN t, tok, u, r, mentioned_in, posted, located_in, mentions
             """
 
-            # Export the query results to a Cypher file
-            apoc_query = r"""
-                CALL apoc.export.cypher.query(
-                    "{query.replace('"', '\\"')}",
-                    "{file_path}",
-                    {{
-                        format: "cypher",
-                        cypherFormat: "create"
-                    }}
-                )
+            # APOC export query with streaming enabled
+            apoc_query = f"""
+            CALL apoc.export.cypher.query(
+                "{query}",
+                null,
+                {{
+                    format: "cypher",
+                    cypherFormat: "create",
+                    stream: true
+                }}
+            ) YIELD cypherStatements
+            RETURN cypherStatements
             """
-            self.graph_search.execute_query(apoc_query)
 
-            # Return success response with file path
-            return {"message": "Snapshot exported successfully", "download_link": file_path}
+            # Execute the query and get the stream of Cypher statements
+            result = self.graph_search.execute_query(apoc_query)
+
+            if not isinstance(result, list):
+                return {"error": "Unexpected response format from query"}
+
+            # Filter and clean the Cypher statements from the stream
+            cleaned_statements = "\n".join(
+                line for item in result
+                for line in item.get("cypherStatements", "").splitlines()
+                if not line.strip().upper().startswith(("BEGIN", "COMMIT", "SCHEMA"))
+            )
+
+            if not cleaned_statements:
+                return {"error": "No valid Cypher statements found in the response"}
+
+            # Save the cleaned statements to a file
+            filename = f"snapshot_{token}_{from_date}_to_{to_date}.cypher"
+            file_path = save_to_file(cleaned_statements, filename)
+
+            # Return a success response with the file link
+            return {"message": "Snapshot exported successfully", "data": {"download_link": file_path}}
+
         except Exception as e:
             logger.error(f"Error exporting snapshot: {str(e)}")
             return {"error": str(e)}

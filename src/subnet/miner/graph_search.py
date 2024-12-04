@@ -17,6 +17,9 @@ class GraphSearch:
     # Define allowed GDS modification commands
     ALLOWED_GDS_COMMANDS = {"CALL GDS.GRAPH.PROJECT", "CALL GDS.GRAPH.DROP"}
 
+    # Define allowed APOC procedures
+    ALLOWED_APOC_COMMANDS = {"CALL APOC.EXPORT.CYPHER.QUERY"}
+
     def __init__(self, settings: MinerSettings):
         self.driver = GraphDatabase.driver(
             settings.GRAPH_DATABASE_URL,
@@ -29,12 +32,18 @@ class GraphSearch:
         )
 
     def execute_query(self, query: str):
+        """
+        Executes a Cypher query after validating it against allowed commands.
+        Supports GDS commands and specific APOC procedures.
+        """
         query_upper = query.upper().strip()
 
+        # Check if query contains prohibited modification clauses
         if any(clause in query_upper for clause in self.MODIFICATION_CLAUSES):
-            if not any(command in query_upper for command in self.ALLOWED_GDS_COMMANDS):
+            # Allow only explicitly permitted commands
+            if not any(command in query_upper for command in self.ALLOWED_GDS_COMMANDS | self.ALLOWED_APOC_COMMANDS):
                 raise ValueError(
-                    "Modification queries are not allowed. Only GDS project/drop and read-only queries are permitted."
+                    "Modification queries are not allowed. Only GDS project/drop, APOC export, and read-only queries are permitted."
                 )
 
         with self.driver.session(default_access_mode=WRITE_ACCESS) as session:
@@ -49,7 +58,7 @@ class GraphSearch:
                     return []
 
                 results_data = []
-                for record in raw_data:  # Directly iterate over raw_data
+                for record in raw_data:
                     processed_record = {}
                     for key, value in record.items():
                         if value is None:
@@ -79,10 +88,12 @@ class GraphSearch:
                 raise ValueError(f"Error executing query: {e.message}")
 
     def solve_twitter_challenge(self, token: str) -> Optional[Dict]:
+        """
+        Solves a Twitter challenge by finding the latest tweet mentioning a token.
+        """
         start_time = time.time()
         try:
             with self.driver.session(default_access_mode=WRITE_ACCESS) as session:
-                # Execute the Cypher query to find the latest tweet for the token
                 query = f"""
                     MATCH (u:UserAccount)-[:MENTIONS]->(token:Token {{name: "{token}"}})
                     MATCH (token)-[:MENTIONED_IN]->(t:Tweet)
@@ -96,8 +107,6 @@ class GraphSearch:
                     ORDER BY t.timestamp DESC
                     LIMIT 1
                 """
-
-                # Run query without additional parameters, as token is embedded directly in the query string
                 result = session.run(query)
                 single_result = result.single()
 
@@ -105,7 +114,6 @@ class GraphSearch:
                     logger.warning(f"No tweet found for token {token}")
                     return None
 
-                # Structure result in a dictionary to match the TwitterChallenge output format
                 return {
                     "tweet_id": single_result["tweet_id"],
                     "user_id": single_result["user_id"],
@@ -119,8 +127,10 @@ class GraphSearch:
             return None
         finally:
             end_time = time.time()
-            execution_time = end_time - start_time
-            logger.info(f"Execution time for solve_twitter_challenge: {execution_time} seconds")
+            logger.info(f"Execution time for solve_twitter_challenge: {end_time - start_time} seconds")
 
     def close(self):
+        """
+        Closes the Neo4j driver connection.
+        """
         self.driver.close()
