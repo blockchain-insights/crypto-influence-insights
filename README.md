@@ -33,11 +33,8 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
 
 ## **Roadmap**
 
-## **Current Stage: V2 - Snapshot Creation**
-The **Crypto Influence Insights Subnet** is currently at the **V2** stage, with **Snapshot Creation** nearing completion. The focus is on implementing miner database snapshots as a proof of concept and exploring data merging across miners to enable multi-token insights. Simultaneously, efforts are being directed toward expanding user-facing functionalities to bring immediate value to end users.
-
 ### **V1: Foundational Features**
-- **Basic Subnet Functionality (Completed):**
+- **V1.0: Basic Subnet Functionality (Completed):**
   - Scrape data for a single token.
   - Provide essential endpoints for token influencer analysis.
   - Deliver APIs for influencer metrics, graph generation, and influencer rankings.
@@ -45,61 +42,74 @@ The **Crypto Influence Insights Subnet** is currently at the **V2** stage, with 
 - **V1.1: Twitter Presence (Completed):**
   - Introduce an endpoint and a Twitter bot to classify influencers by detecting anomalies.
 
-- **V1.2: Immediate User-Facing Value:**
-  - **Public Access APIs for Basic Insights:**
-    - Enable end users to query basic information like influencer rankings and scam alerts for specific tokens.
-  - **Real-Time Scam Alerts:**
-    - Broadcast scam signals via a Twitter bot or webhook subscriptions.
-  - **Token Watchlist Feature:**
-    - Allow users to monitor tokens and receive alerts on influencer activity or risk score changes.
-
-- **V1.3: Enhanced Data Exploration:**
-  - **Graph Query Builder for Non-Technical Users:**
-    - Create a web-based interface for interacting with graph data without requiring Cypher queries.
-  - **Token Relationship Maps:**
-    - Generate visualizations to show connections between tokens, influencers, and tweets.
+- **V1.2: Snapshot Creation (In Progress):**
+  - Implement functionality for miners to create snapshots of token data.
+  - Validate snapshots to ensure data quality and prevent malicious contributions before inclusion in the subnet.
 
 ---
 
-### **V2: Data and Infrastructure Enhancements**
-- **V2.0: Snapshot Creation (Current Stage - Nearing Completion):**
-  - Implement functionality for creating miner database snapshots.
+### **V2: Immediate User-Facing Value**
+- **V2.0: Receipt System for Subnet APIs:**
+  - Develop a receipt mechanism for API usage to track work performed by miners, validators, and other subnet participants.
+  - Ensure transparency and accountability for all API transactions.
 
-- **V2.1: Monetization and Ecosystem Growth:**
+- **V2.1: Public Access APIs for Basic Insights:**
+  - Enable end users to query basic information such as:
+    - Influencer rankings for specific tokens.
+    - Scam alerts based on basic heuristics.
+  - Provide a free-tier API for public access to attract initial users.
+
+- **V2.2: Real-Time Scam Alerts:**
+  - Broadcast scam signals in near real-time via:
+    - A Twitter bot.
+    - Webhook subscriptions for developers and advanced users.
+
+- **V2.3: Token Watchlist Feature:**
+  - Allow users to monitor specific tokens and receive:
+    - Alerts on influencer activity.
+    - Notifications when a token’s risk score changes.
+
+---
+
+### **V3: Data and Infrastructure Enhancements**
+- **V3.0: Monetization and Ecosystem Growth:**
   - **Freemium Access Model:**
     - Introduce tiered API access for free and paid users.
   - **Partnership with Token Platforms:**
-    - Collaborate with launchpads and exchanges to offer scam detection and verified metrics.
+    - Collaborate with launchpads and exchanges to provide:
+      - Scam detection as a service.
+      - Verified influencer metrics for token launches.
 
-- **V2.2: Cross-Subnet Interoperability:**
+- **V3.1: Cross-Subnet Interoperability:**
   - **Integration with Other Subnets:**
-    - Leverage data from other subnets for enhanced scam detection.
+    - Leverage data from complementary subnets to enhance scam detection.
   - **Enhanced Miner Collaboration Tools:**
     - Build miner dashboards for performance comparison and improvement tracking.
 
 ---
 
-### **V3: Advanced Detection and Insights**
-- **V3.0: Multi-Token Insights:**
+### **V4: Advanced Detection and Insights**
+- **V4.0: Multi-Token Insights:**
   - Enable querying merged datasets for insights across multiple tokens.
 
-- **V3.1: Expanded Advanced Detection Features:**
+- **V4.1: Expanded Advanced Detection Features:**
   - **Behavioral Scoring for Influencers:**
-    - Analyze patterns like sentiment and historical activity for suspicious behavior.
+    - Analyze posting patterns, sentiment, and historical activity to detect suspicious behavior.
   - **Scam Campaign Profiling:**
     - Identify coordinated campaigns and flag for validator review.
 
 ---
 
-### **V4: Visualization and Accessibility**
+### **V5: Visualization and Accessibility**
 - **Visualization Dashboard:**
   - Create a user-friendly dashboard for API results visualization.
+
 - **Jupyter Notebooks:**
   - Develop example notebooks for API and data usage, including reusable templates.
 
 ---
 
-### **V5: LLM Integration**
+### **V6: LLM Integration**
 - **LLM Capabilities for Detection:**
   - Add prompts for efficient influencer and scam detection with fuzzy thresholds.
 - **Dedicated Detection Models:**
@@ -110,18 +120,20 @@ The **Crypto Influence Insights Subnet** is currently at the **V2** stage, with 
 ### **General Enhancements**
 - **Open-Source Tools:**
   - Release lightweight tools and libraries to foster community adoption.
+
 - **Regular Community Updates:**
   - Share progress, success stories, and roadmap updates via newsletters and Discord.
+
 - **User Feedback Loops:**
   - Continuously improve APIs and tools based on community feedback.
 
 ---
 
 ## **Next Steps**
-1. Finalize **Snapshot Creation** to complete the current stage.
-2. Begin implementation of **Public Access APIs**, **Real-Time Scam Alerts**, and the **Token Watchlist Feature** to deliver immediate user-facing value.
-3. Deploy a Twitter bot for scam alerts as a low-effort, high-impact addition.
-4. Engage with token communities to drive awareness and adoption.
+1. Finalize and validate **Snapshot Creation** to ensure that miners’ contributions are trustworthy and free from malicious data.
+2. Develop and implement the **Receipt System** to track API work and contributions transparently.
+3. Begin work on **Public Access APIs** and related quick-win functionalities (e.g., scam alerts and token watchlists) once the receipt system is complete.
+4. Engage with the community to provide updates and gather feedback for iterative improvements.
 
 ## Overview
 
