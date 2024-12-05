@@ -31,5 +31,8 @@ class MinerSettings(BaseSettings):
     GRAPH_DATABASE_PASSWORD: str
     GRAPH_DATABASE_URL: str
 
+    PINATA_API_KEY: str
+    PINATA_SECRET_API_KEY: str
+
     class Config:
         extra = 'ignore'

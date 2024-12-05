@@ -8,7 +8,7 @@ from communex.client import CommuneClient
 from communex.module import Module, endpoint
 from communex.module._rate_limiters.limiters import IpLimiterParams
 from helpers.file_utils import save_to_file
-from helpers.cypher_utils import generate_cypher_from_results
+from helpers.ipfs_utils import upload_to_pinata, get_ipfs_link
 from keylimiter import TokenBucketLimiter
 from loguru import logger
 from starlette.middleware.cors import CORSMiddleware
@@ -109,6 +109,17 @@ class Miner(Module):
 
     @endpoint
     async def export_snapshot(self, token: str, from_date: str, to_date: str) -> dict:
+        """
+        Exports a snapshot of data from the graph database and uploads it to Pinata.
+
+        Args:
+            token (str): The token for which data is exported.
+            from_date (str): Start date for the snapshot.
+            to_date (str): End date for the snapshot.
+
+        Returns:
+            dict: Response containing the IPFS link or an error message.
+        """
         try:
             # Properly formatted Cypher query
             query = f"""
@@ -151,15 +162,29 @@ class Miner(Module):
             if not cleaned_statements:
                 return {"error": "No valid Cypher statements found in the response"}
 
-            # Save the cleaned statements to a file
-            filename = f"snapshot_{token}_{from_date}_to_{to_date}.cypher"
-            file_path = save_to_file(cleaned_statements, filename)
+            # Generate the filename
+            file_name = f"snapshot_{token}_{from_date}_to_{to_date}.cypher"
 
-            # Return a success response with the file link
-            return {"message": "Snapshot exported successfully", "data": {"download_link": file_path}}
+            # Upload the file content to Pinata
+            upload_response = upload_to_pinata(cleaned_statements, file_name, settings)
+
+            if "error" in upload_response:
+                return {"error": upload_response["error"]}
+
+            ipfs_hash = upload_response.get("IpfsHash")
+            if not ipfs_hash:
+                return {"error": "Failed to retrieve IPFS hash from Pinata response"}
+
+            # Generate a public IPFS link
+            ipfs_link = f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}"
+
+            # Return success response with the IPFS link
+            return {
+                "message": "Snapshot exported and uploaded to IPFS successfully",
+                "data": {"ipfs_link": ipfs_link},
+            }
 
         except Exception as e:
-            logger.error(f"Error exporting snapshot: {str(e)}")
             return {"error": str(e)}
 
 
