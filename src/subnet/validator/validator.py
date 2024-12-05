@@ -627,6 +627,7 @@ class Validator(Module):
                 "export_snapshot",
                 miner_key,
                 {
+                    "miner_key": miner_key,
                     "token": token,
                     "from_date": from_date,
                     "to_date": to_date,

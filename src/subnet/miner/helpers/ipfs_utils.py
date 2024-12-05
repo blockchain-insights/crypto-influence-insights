@@ -7,17 +7,18 @@ from src.subnet.miner._config import MinerSettings, load_environment
 
 # Load environment variables from .env
 load_dotenv()
-def upload_to_pinata(file_content: str, file_name: str, settings) -> dict:
+def upload_file_to_pinata(file_content: str, file_name: str, miner_key: str, settings: MinerSettings) -> dict:
     """
-    Uploads a file to Pinata's IPFS service.
+    Uploads a single file to Pinata's IPFS service under a directory-like naming convention.
 
     Args:
         file_content (str): Content of the file to be uploaded.
-        file_name (str): Desired name of the file on Pinata.
-        settings: Application settings containing Pinata API credentials.
+        file_name (str): Name of the file.
+        miner_key (str): Logical directory name for the miner.
+        settings (MinerSettings): Application settings containing Pinata API credentials.
 
     Returns:
-        dict: Response from the Pinata API containing the IPFS hash and metadata.
+        dict: Response from Pinata containing the file's CID and metadata.
     """
     url = "https://api.pinata.cloud/pinning/pinFileToIPFS"
     headers = {
@@ -25,9 +26,12 @@ def upload_to_pinata(file_content: str, file_name: str, settings) -> dict:
         "pinata_secret_api_key": settings.PINATA_SECRET_API_KEY,
     }
 
-    # Use in-memory file for upload
+    # Use in-memory file object
     file_like = io.BytesIO(file_content.encode("utf-8"))
-    files = {"file": (file_name, file_like)}
+
+    # Use miner_key as a logical folder prefix
+    logical_path = os.path.join(miner_key, file_name)
+    files = {"file": (logical_path, file_like)}
 
     try:
         response = requests.post(url, headers=headers, files=files)

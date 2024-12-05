@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 from datetime import datetime
@@ -8,7 +9,7 @@ from communex.client import CommuneClient
 from communex.module import Module, endpoint
 from communex.module._rate_limiters.limiters import IpLimiterParams
 from helpers.file_utils import save_to_file
-from helpers.ipfs_utils import upload_to_pinata, get_ipfs_link
+from helpers.ipfs_utils import upload_file_to_pinata, get_ipfs_link
 from keylimiter import TokenBucketLimiter
 from loguru import logger
 from starlette.middleware.cors import CORSMiddleware
@@ -108,17 +109,18 @@ class Miner(Module):
         return challenge
 
     @endpoint
-    async def export_snapshot(self, token: str, from_date: str, to_date: str) -> dict:
+    async def export_snapshot(self, miner_key: str, token: str, from_date: str, to_date: str) -> dict:
         """
-        Exports a snapshot of data from the graph database and uploads it to Pinata.
+        Exports a snapshot of data, uploads it to Pinata, and returns the file's IPFS link.
 
         Args:
+            miner_key (str): Unique identifier for the miner.
             token (str): The token for which data is exported.
             from_date (str): Start date for the snapshot.
             to_date (str): End date for the snapshot.
 
         Returns:
-            dict: Response containing the IPFS link or an error message.
+            dict: Response containing the file's CID and IPFS link.
         """
         try:
             # Properly formatted Cypher query
@@ -162,26 +164,31 @@ class Miner(Module):
             if not cleaned_statements:
                 return {"error": "No valid Cypher statements found in the response"}
 
-            # Generate the filename
-            file_name = f"snapshot_{token}_{from_date}_to_{to_date}.cypher"
+            # Generate the filename with timestamp
+            current_timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            file_name = f"snapshot_{token}_{from_date}_to_{to_date}_{current_timestamp}.cypher"
 
-            # Upload the file content to Pinata
-            upload_response = upload_to_pinata(cleaned_statements, file_name, settings)
+            # Upload the file to Pinata
+            upload_response = upload_file_to_pinata(cleaned_statements, file_name, miner_key, settings)
 
             if "error" in upload_response:
                 return {"error": upload_response["error"]}
 
-            ipfs_hash = upload_response.get("IpfsHash")
-            if not ipfs_hash:
-                return {"error": "Failed to retrieve IPFS hash from Pinata response"}
+            file_cid = upload_response.get("IpfsHash")
+            if not file_cid:
+                return {"error": "Failed to retrieve CID for the snapshot"}
 
-            # Generate a public IPFS link
-            ipfs_link = f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}"
+            # Generate a public IPFS link for the file
+            file_link = get_ipfs_link(file_cid)
 
-            # Return success response with the IPFS link
+            # Return success response with file details
             return {
-                "message": "Snapshot exported and uploaded to IPFS successfully",
-                "data": {"ipfs_link": ipfs_link},
+                "message": "Snapshot uploaded to IPFS successfully",
+                "data": {
+                    "file_name": file_name,
+                    "file_cid": file_cid,
+                    "file_link": file_link,
+                },
             }
 
         except Exception as e:
