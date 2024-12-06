@@ -9,7 +9,11 @@ from communex.client import CommuneClient
 from communex.module import Module, endpoint
 from communex.module._rate_limiters.limiters import IpLimiterParams
 from helpers.file_utils import save_to_file
-from helpers.ipfs_utils import upload_file_to_pinata, get_ipfs_link
+from helpers.ipfs_utils import (
+    upload_file_to_pinata,
+    delete_old_snapshots,
+    get_ipfs_link
+    )
 from keylimiter import TokenBucketLimiter
 from loguru import logger
 from starlette.middleware.cors import CORSMiddleware
@@ -108,13 +112,15 @@ class Miner(Module):
 
         return challenge
 
+    from datetime import datetime
+
     @endpoint
     async def export_snapshot(self, miner_key: str, token: str, from_date: str, to_date: str) -> dict:
         """
-        Exports a snapshot of data, uploads it to Pinata, and returns the file's IPFS link.
+        Exports a snapshot of data, deletes old snapshots, and uploads the new snapshot to Pinata.
 
         Args:
-            miner_key (str): Unique identifier for the miner.
+            miner_key (str): The prefix for identifying snapshots related to the miner.
             token (str): The token for which data is exported.
             from_date (str): Start date for the snapshot.
             to_date (str): End date for the snapshot.
@@ -123,7 +129,7 @@ class Miner(Module):
             dict: Response containing the file's CID and IPFS link.
         """
         try:
-            # Properly formatted Cypher query
+            # Properly formatted Cypher query to extract data
             query = f"""
             MATCH (t:Tweet)<-[mentioned_in:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
             WHERE datetime(replace(t.timestamp, ' ', 'T')) >= datetime('{from_date}')
@@ -148,7 +154,7 @@ class Miner(Module):
             RETURN cypherStatements
             """
 
-            # Execute the query and get the stream of Cypher statements
+            # Execute the APOC query and fetch the results
             result = self.graph_search.execute_query(apoc_query)
 
             if not isinstance(result, list):
@@ -164,29 +170,31 @@ class Miner(Module):
             if not cleaned_statements:
                 return {"error": "No valid Cypher statements found in the response"}
 
-            # Generate the filename with timestamp
+            # Generate the prefixed filename with timestamp
             current_timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-            file_name = f"snapshot_{token}_{from_date}_to_{to_date}_{current_timestamp}.cypher"
+            file_name = f"{miner_key}_snapshot_{token}_{from_date}_to_{to_date}_{current_timestamp}.cypher"
+            file_content = cleaned_statements
 
-            # Upload the file to Pinata
-            upload_response = upload_file_to_pinata(cleaned_statements, file_name, miner_key, settings)
+            # Delete old snapshots for the same miner_key
+            delete_old_snapshots(miner_key, settings)
 
+            # Upload the new snapshot
+            upload_response = upload_file_to_pinata(file_name, file_content, settings)
             if "error" in upload_response:
                 return {"error": upload_response["error"]}
 
+            # Generate the IPFS link for the new file
             file_cid = upload_response.get("IpfsHash")
             if not file_cid:
                 return {"error": "Failed to retrieve CID for the snapshot"}
 
-            # Generate a public IPFS link for the file
             file_link = get_ipfs_link(file_cid)
 
-            # Return success response with file details
+            # Return success with the file link
             return {
-                "message": "Snapshot uploaded to IPFS successfully",
+                "message": "Snapshot uploaded successfully",
                 "data": {
                     "file_name": file_name,
-                    "file_cid": file_cid,
                     "file_link": file_link,
                 },
             }
