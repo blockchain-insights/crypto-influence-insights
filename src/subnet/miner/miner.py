@@ -18,16 +18,19 @@ from keylimiter import TokenBucketLimiter
 from loguru import logger
 from starlette.middleware.cors import CORSMiddleware
 from src.subnet import VERSION
+from src.subnet.encryption import generate_hash
 from src.subnet.miner._config import MinerSettings, load_environment
 from src.subnet.miner.graph_search import GraphSearch
 from src.subnet.protocol import TwitterChallenge
+from substrateinterface import Keypair
 
 
 
 class Miner(Module):
 
-    def __init__(self, settings: MinerSettings):
+    def __init__(self, keypair: Keypair, settings: MinerSettings):
         super().__init__()
+        self.keypair = keypair
         self.settings = settings
         self.graph_search = GraphSearch(settings)
 
@@ -58,13 +61,36 @@ class Miner(Module):
 
     @endpoint
     async def query(self, query: str, validator_key: str) -> dict:
+        """
+        Process the query and return a signed response.
 
-        logger.debug(f"Received challenge request from {validator_key}", validator_key=validator_key)
+        Args:
+            query (str): The query string.
+            validator_key (str): The validator's key requesting the query.
+
+        Returns:
+            dict: The signed response containing the result, result_hash, and result_hash_signature.
+        """
+        logger.debug(f"Received query request from {validator_key}", validator_key=validator_key)
 
         try:
+            # Execute the query using the existing graph_search logic
             result = self.graph_search.execute_query(query)
-            return result
+
+            # Generate the result hash
+            response_hash = generate_hash(str(result))
+
+            # Sign the result hash using the miner's keypair
+            result_hash_signature = self.keypair.sign(response_hash.encode('utf-8')).hex()
+
+            # Return the signed response
+            return {
+                "result": result,
+                "result_hash": response_hash,
+                "result_hash_signature": result_hash_signature
+            }
         except Exception as e:
+            # Log and return the error
             logger.error(f"Error executing query: {e}")
             return {"error": str(e)}
 
@@ -245,7 +271,7 @@ if __name__ == "__main__":
     )
 
     c_client = CommuneClient(get_node_url(use_testnet=use_testnet))
-    miner = Miner(settings=settings)
+    miner = Miner(keypair=keypair, settings=settings)
     refill_rate: float = 1 / 1000
     bucket = TokenBucketLimiter(
         refill_rate=refill_rate,

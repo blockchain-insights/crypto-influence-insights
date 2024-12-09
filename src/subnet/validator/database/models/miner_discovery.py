@@ -75,6 +75,21 @@ class MinerDiscoveryManager:
             miners = [to_dict(miner) for miner in result.scalars().all()]
             return miners
 
+    async def get_miners_per_token(self):
+        async with self.session_manager.session() as session:
+            result = await session.execute(
+                select(
+                    MinerDiscovery.token,
+                    func.count(MinerDiscovery.id).label('count')
+                )
+                .group_by(MinerDiscovery.token)
+                .order_by(func.count(MinerDiscovery.id).desc())
+            )
+
+            rows = result.fetchall()
+
+            return [{'token': row.token, 'count': row.count} for row in rows]
+
     async def update_miner_rank(self, miner_key: str, new_rank: float):
         async with self.session_manager.session() as session:
             async with session.begin():

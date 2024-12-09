@@ -4,7 +4,7 @@ import numpy as np
 from random import choice
 import re
 from src.subnet.validator.validator import Validator
-from src.subnet.validator_api.services import QueryApi
+from src.subnet.gateway.services import QueryApi
 from loguru import logger
 
 class TwitterFraudDetectionApi(QueryApi):

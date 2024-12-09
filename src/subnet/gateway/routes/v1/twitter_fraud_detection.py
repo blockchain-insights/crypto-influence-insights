@@ -3,9 +3,9 @@ from fastapi import Depends, APIRouter, Query, HTTPException
 from pydantic import BaseModel
 
 from src.subnet.validator.validator import Validator
-from src.subnet.validator_api.helpers.reponse_formatter import format_response, ResponseType
-from src.subnet.validator_api.services.twitter_fraud_detection_api import TwitterFraudDetectionApi
-from src.subnet.validator_api import get_validator
+from src.subnet.gateway.helpers.reponse_formatter import format_response, ResponseType
+from src.subnet.gateway.services.twitter_fraud_detection_api import TwitterFraudDetectionApi
+from src.subnet.gateway import get_validator
 
 twitter_fraud_detection_router = APIRouter(prefix="/v1/twitter-fraud-detection", tags=["twitter-fraud-detection"])
 

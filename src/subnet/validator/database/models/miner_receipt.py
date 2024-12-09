@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict, Union
+from dateutil import parser
 from pydantic import BaseModel
 from sqlalchemy import Column, String, DateTime, update, insert, BigInteger, Boolean, UniqueConstraint, Text, select, \
     func, text
@@ -58,25 +59,25 @@ class MinerReceiptManager:
                 ).values(accepted=True)
                 await session.execute(stmt)
 
-    async def get_receipts_by_miner_key(self, miner_key: str, page: int = 1, page_size: int = 10):
+    async def get_receipts_by_miner_key(self, miner_key: Optional[str], validator_key: Optional[str], page: int = 1,
+                                        page_size: int = 10):
         async with self.session_manager.session() as session:
-            # Calculate offset
             offset = (page - 1) * page_size
+            conditions = []
+            if miner_key is not None:
+                conditions.append(MinerReceipt.miner_key == miner_key)
+            if validator_key is not None:
+                conditions.append(MinerReceipt.validator_key == validator_key)
 
-            # Query total number of receipts
             total_items_result = await session.execute(
                 select(func.count(MinerReceipt.id))
-                .where(MinerReceipt.miner_key == miner_key)
+                .where(*conditions)
             )
             total_items = total_items_result.scalar()
-
-            # Calculate total pages
             total_pages = (total_items + page_size - 1) // page_size
-
-            # Query paginated receipts
             result = await session.execute(
                 select(MinerReceipt)
-                .where(MinerReceipt.miner_key == miner_key)
+                .where(*conditions)
                 .order_by(MinerReceipt.timestamp.desc())
                 .limit(page_size)
                 .offset(offset)
@@ -84,7 +85,36 @@ class MinerReceiptManager:
             receipts = result.scalars().all()
 
             return {
-                "receipts": receipts,
+                "data": receipts,
+                "total_pages": total_pages,
+                "total_items": total_items
+            }
+
+    async def get_receipts_by_to_sync(self, validator_key: str, timestamp: str, page: int = 1, page_size: int = 10):
+
+        timestamp_obj = parser.isoparse(timestamp)
+        async with self.session_manager.session() as session:
+            # Calculate offset
+            offset = (page - 1) * page_size
+
+            total_items_result = await session.execute(
+                select(func.count(MinerReceipt.id))
+                .where(MinerReceipt.timestamp >= timestamp_obj, MinerReceipt.validator_key == validator_key)
+            )
+            total_items = total_items_result.scalar()
+            total_pages = (total_items + page_size - 1) // page_size
+
+            result = await session.execute(
+                select(MinerReceipt)
+                .where(MinerReceipt.timestamp >= timestamp_obj, MinerReceipt.validator_key == validator_key)
+                .order_by(MinerReceipt.timestamp.asc())
+                .limit(page_size)
+                .offset(offset)
+            )
+            receipts = result.scalars().all()
+
+            return {
+                "data": receipts,
                 "total_pages": total_pages,
                 "total_items": total_items
             }

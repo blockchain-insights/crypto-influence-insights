@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from random import sample
 from typing import cast, Dict, Optional
 
+from aioredis import Redis
 from communex.client import CommuneClient  # type: ignore
 from communex.errors import NetworkTimeoutError
 from communex.misc import get_map_modules
@@ -44,6 +45,7 @@ class Validator(Module):
             tweet_cache_manager: TweetCacheManager,
             user_cache_manager: UserCacheManager,
             twitter_service: TwitterService,
+            redis_client: Redis,
             query_timeout: int = 60,
             challenge_timeout: int = 60,
             snapshot_timeout: int = 60
@@ -64,6 +66,7 @@ class Validator(Module):
         self.user_cache_manager = user_cache_manager
         self.twitter_service = twitter_service
         self.terminate_event = threading.Event()
+        self.redis_client = redis_client
 
     @staticmethod
     def get_addresses(client: CommuneClient, netuid: int) -> dict[int, str]:
@@ -428,6 +431,7 @@ class Validator(Module):
         timestamp = datetime.utcnow()
         query_hash = generate_hash(query)
 
+        # Single miner case
         if miner_key:
             miner = await self.miner_discovery_manager.get_miner_by_key(miner_key, token)
             if not miner:
@@ -437,10 +441,57 @@ class Validator(Module):
                     "miner_keys": None,
                     "query_hash": query_hash,
                     "query": query,
-                    "response": []}
+                    "response": []
+                }
 
             response = await self._query_miner(miner, query)
-            await self.miner_receipt_manager.store_miner_receipt(request_id, miner_key, token, query_hash, timestamp)
+            if response:
+                result = response['response']['result']
+                result_hash = response['response']['result_hash']
+                result_hash_signature = response['response']["result_hash_signature"]
+
+                # Recompute the hash from the response
+                recomputed_hash = generate_hash(str(result))
+
+                # Compare recomputed hash with the miner-provided hash
+                if recomputed_hash != result_hash:
+                    logger.warning("Integrity check failed: recomputed hash does not match miner's hash")
+                    return {
+                        "request_id": request_id,
+                        "timestamp": timestamp,
+                        "miner_keys": [miner_key],
+                        "query_hash": query_hash,
+                        "query": query,
+                        "response": None
+                    }
+
+                miner_key_pair = Keypair(ss58_address=miner_key)
+                result_hash_signature_bytes = bytes.fromhex(result_hash_signature)
+
+                # Verify the signature of the recomputed hash
+                if not miner_key_pair.verify(recomputed_hash.encode('utf-8'), signature=result_hash_signature_bytes):
+                    logger.warning(f"Invalid result hash signature", miner_key=miner_key,
+                                   validator_key=self.key.ss58_address)
+                    return {
+                        "request_id": request_id,
+                        "timestamp": timestamp,
+                        "miner_keys": [miner_key],
+                        "query_hash": query_hash,
+                        "query": query,
+                        "response": None
+                    }
+
+                await self.miner_receipt_manager.store_miner_receipt(request_id, miner_key, token, query_hash,
+                                                                     timestamp)
+
+                return {
+                    "request_id": request_id,
+                    "timestamp": timestamp,
+                    "miner_keys": [miner_key],
+                    "query_hash": query_hash,
+                    "query": query,
+                    **response
+                }
 
             return {
                 "request_id": request_id,
@@ -448,41 +499,134 @@ class Validator(Module):
                 "miner_keys": [miner_key],
                 "query_hash": query_hash,
                 "query": query,
-                "response": response
+                "response": None
+            }
+
+        # Multiple miners case
+        select_count = 3
+        sample_size = 16
+
+        miners = await self.miner_discovery_manager.get_miners_by_token(token)
+        if len(miners) < select_count:
+            top_miners = miners
+        elif len(miners) == 0:
+            return {
+                "request_id": request_id,
+                "timestamp": timestamp,
+                "miner_keys": [],
+                "query_hash": query_hash,
+                "query": query,
+                "response": None
             }
         else:
-            select_count = 3
-            sample_size = 16
-            miners = await self.miner_discovery_manager.get_miners_by_token(token)
+            top_miners = random.sample(miners[:sample_size], select_count)
 
-            if len(miners) < 3:
-                top_miners = miners
-            else:
-                top_miners = sample(miners[:sample_size], select_count)
+        responses = {}
 
-            query_tasks = []
-            for miner in top_miners:
-                query_tasks.append(self._query_miner(miner, query))
+        query_tasks = {
+            asyncio.create_task(self._query_miner(miner, query)): (miner, time.time())
+            for miner in top_miners
+        }
 
-            responses = await asyncio.gather(*query_tasks)
+        try:
+            pending = set(query_tasks.keys())
+            start_time = time.time()
 
-            combined_responses = list(zip(top_miners, responses))
+            while pending:
+                if time.time() - start_time > self.query_timeout:
+                    break
 
-            for miner, response in combined_responses:
-                if response:
-                    await self.miner_receipt_manager.store_miner_receipt(request_id, miner['miner_key'], token , query_hash, timestamp)
+                done, pending = await asyncio.wait(
+                    pending,
+                    timeout=max(0.0, self.query_timeout - (time.time() - start_time)),
+                    return_when=asyncio.FIRST_COMPLETED
+                )
 
-            miner, random_response = random.choice(combined_responses)
-            await self.miner_receipt_manager.accept_miner_receipt(request_id, miner['miner_key'])
+                if not done:
+                    break
+
+                for completed_task in done:
+                    try:
+                        response = await completed_task
+                        current_miner, start_time = query_tasks[completed_task]
+                        response_time = round(time.time() - start_time, 3)
+
+                        if not response:
+                            continue
+
+                        result = response['response']['result']
+                        result_hash = response['response']['result_hash']
+                        result_hash_signature = response['response']["result_hash_signature"]
+
+                        # Recompute the hash from the response
+                        recomputed_hash = generate_hash(str(result))
+
+                        # Compare recomputed hash with the miner-provided hash
+                        if recomputed_hash != result_hash:
+                            logger.warning("Integrity check failed: recomputed hash does not match miner's hash")
+                            continue
+
+                        miner_key = current_miner['miner_key']
+                        miner_key_pair = Keypair(ss58_address=miner_key)
+                        result_hash_signature_bytes = bytes.fromhex(result_hash_signature)
+
+                        # Verify the signature of the recomputed hash
+                        if not miner_key_pair.verify(recomputed_hash.encode('utf-8'),
+                                                     signature=result_hash_signature_bytes):
+                            logger.warning(f"Invalid result hash signature", miner_key=miner_key,
+                                           validator_key=self.key.ss58_address)
+                            continue
+
+                        if result_hash in responses:
+                            existing_response, existing_miners = responses[result_hash]
+                            existing_miners.append(current_miner)
+
+                            first_miner = existing_miners[0]
+                            receipt = {
+                                "validator_key": self.key.ss58_address,
+                                "request_id": request_id,
+                                "miner_key": first_miner['miner_key'],
+                                "query": query,
+                                "query_hash": query_hash,
+                                "response_time": response_time,
+                                "timestamp": timestamp.isoformat(),
+                                "result_hash": result_hash,
+                                "result_hash_signature": result_hash_signature
+                            }
+
+                            await self.redis_client.lpush('receipts', json.dumps(receipt))
+
+                            for task in pending:
+                                task.cancel()
+
+                            return {
+                                "request_id": request_id,
+                                "timestamp": timestamp,
+                                "miner_keys": [miner['miner_key'] for miner in top_miners],
+                                "query_hash": query_hash,
+                                "query": query,
+                                **existing_response
+                            }
+                        else:
+                            responses[result_hash] = (response, [current_miner])
+
+                    except Exception as e:
+                        logger.error(f"Error querying miner", error=e)
+                        continue
 
             return {
                 "request_id": request_id,
                 "timestamp": timestamp,
-                "miner_keys": [miner['miner_key'] for miner in top_miners],
+                "miner_keys": [],
                 "query_hash": query_hash,
                 "query": query,
-                "response": random_response
+                "response": None,
             }
+
+        finally:
+            for task in query_tasks.keys():
+                if not task.done():
+                    task.cancel()
 
     async def fetch_snapshot(self, token: str, from_date: str, to_date: str, miner_key: Optional[str]) -> dict:
         """

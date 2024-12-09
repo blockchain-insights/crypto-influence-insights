@@ -55,6 +55,9 @@ class ValidatorSettings(BaseSettings):
 
     QUERY_TIMEOUT: int   # cross check query timeout
     CHALLENGE_TIMEOUT: int  # challenge and llm challenge time
+    SNAPSHOT_TIMEOUT: int
+
+    RECEIPT_SYNC_FREQUENCY: int = 3600
 
     model_config = ConfigDict(
         extra='ignore',
@@ -81,7 +84,7 @@ class ValidatorSettings(BaseSettings):
     @staticmethod
     def fetch_github_settings():
         local_config_path = 'subnet/validator/config.json'
-        url = f'https://raw.githubusercontent.com/blockchain-insights/blockchain-insights-subnet/main/src/{local_config_path}'
+        url = f'https://raw.githubusercontent.com/blockchain-insights/crypto-influence-insights/main/src/{local_config_path}'
         data = {}
         try:
             response = requests.get(url, timeout=5)

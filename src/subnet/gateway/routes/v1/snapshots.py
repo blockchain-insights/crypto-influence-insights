@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from src.subnet.validator.validator import Validator
-from src.subnet.validator_api.services.snapshots_api import SnapshotService
-from src.subnet.validator_api.helpers.reponse_formatter import format_response, ResponseType
-from src.subnet.validator_api import get_validator
+from src.subnet.gateway.services.snapshots_api import SnapshotService
+from src.subnet.gateway.helpers.reponse_formatter import format_response, ResponseType
+from src.subnet.gateway import get_validator
 
 snapshot_router = APIRouter(prefix="/v1/snapshots", tags=["snapshots"])
 
