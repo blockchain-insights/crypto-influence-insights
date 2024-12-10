@@ -426,7 +426,7 @@ class Validator(Module):
                     logger.info("Terminating validation loop")
                     break
 
-    async def query_miner(self, token: str, query, miner_key: Optional[str]) -> dict:
+    async def query_miner(self, token: str, query: str, miner_key: Optional[str]) -> dict:
         request_id = str(uuid.uuid4())
         timestamp = datetime.utcnow()
         query_hash = generate_hash(query)
@@ -439,57 +439,72 @@ class Validator(Module):
                     "request_id": request_id,
                     "timestamp": timestamp,
                     "miner_keys": None,
-                    "query_hash": query_hash,
+                    "token": token,
                     "query": query,
+                    "query_hash": query_hash,
                     "response": []
                 }
 
+            start_time = time.time()
             response = await self._query_miner(miner, query)
+            response_time = round(time.time() - start_time, 3)
+
             if response:
+                # Extract and recompute the hash
                 result = response['response']['result']
                 result_hash = response['response']['result_hash']
-                result_hash_signature = response['response']["result_hash_signature"]
+                result_hash_signature = response['response']['result_hash_signature']
 
-                # Recompute the hash from the response
                 recomputed_hash = generate_hash(str(result))
-
-                # Compare recomputed hash with the miner-provided hash
                 if recomputed_hash != result_hash:
                     logger.warning("Integrity check failed: recomputed hash does not match miner's hash")
                     return {
                         "request_id": request_id,
                         "timestamp": timestamp,
                         "miner_keys": [miner_key],
-                        "query_hash": query_hash,
+                        "token": token,
                         "query": query,
+                        "query_hash": query_hash,
                         "response": None
                     }
 
+                # Authenticity check
                 miner_key_pair = Keypair(ss58_address=miner_key)
-                result_hash_signature_bytes = bytes.fromhex(result_hash_signature)
-
-                # Verify the signature of the recomputed hash
-                if not miner_key_pair.verify(recomputed_hash.encode('utf-8'), signature=result_hash_signature_bytes):
-                    logger.warning(f"Invalid result hash signature", miner_key=miner_key,
-                                   validator_key=self.key.ss58_address)
+                if not miner_key_pair.verify(recomputed_hash.encode('utf-8'), bytes.fromhex(result_hash_signature)):
+                    logger.warning(f"Invalid result hash signature", miner_key=miner_key)
                     return {
                         "request_id": request_id,
                         "timestamp": timestamp,
                         "miner_keys": [miner_key],
-                        "query_hash": query_hash,
+                        "token": token,
                         "query": query,
+                        "query_hash": query_hash,
                         "response": None
                     }
 
-                await self.miner_receipt_manager.store_miner_receipt(request_id, miner_key, token, query_hash,
-                                                                     timestamp)
+                # Push receipt to Redis
+                receipt = {
+                    "validator_key": self.key.ss58_address,
+                    "request_id": request_id,
+                    "miner_key": miner_key,
+                    "token": token,
+                    "query": query,
+                    "query_hash": query_hash,
+                    "response_time": response_time,
+                    "timestamp": timestamp.isoformat(),
+                    "result_hash": result_hash,
+                    "result_hash_signature": result_hash_signature
+                }
+                await self.redis_client.lpush('receipts', json.dumps(receipt))
 
                 return {
                     "request_id": request_id,
                     "timestamp": timestamp,
                     "miner_keys": [miner_key],
-                    "query_hash": query_hash,
+                    "token": token,
                     "query": query,
+                    "query_hash": query_hash,
+                    "response_time": response_time,
                     **response
                 }
 
@@ -497,8 +512,9 @@ class Validator(Module):
                 "request_id": request_id,
                 "timestamp": timestamp,
                 "miner_keys": [miner_key],
-                "query_hash": query_hash,
+                "token": token,
                 "query": query,
+                "query_hash": query_hash,
                 "response": None
             }
 
@@ -507,20 +523,19 @@ class Validator(Module):
         sample_size = 16
 
         miners = await self.miner_discovery_manager.get_miners_by_token(token)
-        if len(miners) < select_count:
-            top_miners = miners
-        elif len(miners) == 0:
+        if len(miners) == 0:
             return {
                 "request_id": request_id,
                 "timestamp": timestamp,
                 "miner_keys": [],
-                "query_hash": query_hash,
+                "token": token,
                 "query": query,
+                "query_hash": query_hash,
                 "response": None
             }
-        else:
-            top_miners = random.sample(miners[:sample_size], select_count)
 
+        top_miners = miners[:sample_size] if len(miners) <= select_count else random.sample(miners[:sample_size],
+                                                                                            select_count)
         responses = {}
 
         query_tasks = {
@@ -542,85 +557,82 @@ class Validator(Module):
                     return_when=asyncio.FIRST_COMPLETED
                 )
 
-                if not done:
-                    break
-
                 for completed_task in done:
                     try:
                         response = await completed_task
-                        current_miner, start_time = query_tasks[completed_task]
-                        response_time = round(time.time() - start_time, 3)
+                        current_miner, task_start_time = query_tasks[completed_task]
+                        response_time = round(time.time() - task_start_time, 3)
 
                         if not response:
                             continue
 
+                        # Extract response components
                         result = response['response']['result']
                         result_hash = response['response']['result_hash']
-                        result_hash_signature = response['response']["result_hash_signature"]
+                        result_hash_signature = response['response']['result_hash_signature']
 
-                        # Recompute the hash from the response
+                        # Integrity check
                         recomputed_hash = generate_hash(str(result))
-
-                        # Compare recomputed hash with the miner-provided hash
                         if recomputed_hash != result_hash:
                             logger.warning("Integrity check failed: recomputed hash does not match miner's hash")
                             continue
 
+                        # Authenticity check
                         miner_key = current_miner['miner_key']
                         miner_key_pair = Keypair(ss58_address=miner_key)
-                        result_hash_signature_bytes = bytes.fromhex(result_hash_signature)
-
-                        # Verify the signature of the recomputed hash
                         if not miner_key_pair.verify(recomputed_hash.encode('utf-8'),
-                                                     signature=result_hash_signature_bytes):
-                            logger.warning(f"Invalid result hash signature", miner_key=miner_key,
-                                           validator_key=self.key.ss58_address)
+                                                     bytes.fromhex(result_hash_signature)):
+                            logger.warning(f"Invalid result hash signature", miner_key=miner_key)
                             continue
 
+                        # Add or update the response
                         if result_hash in responses:
                             existing_response, existing_miners = responses[result_hash]
                             existing_miners.append(current_miner)
-
-                            first_miner = existing_miners[0]
-                            receipt = {
-                                "validator_key": self.key.ss58_address,
-                                "request_id": request_id,
-                                "miner_key": first_miner['miner_key'],
-                                "query": query,
-                                "query_hash": query_hash,
-                                "response_time": response_time,
-                                "timestamp": timestamp.isoformat(),
-                                "result_hash": result_hash,
-                                "result_hash_signature": result_hash_signature
-                            }
-
-                            await self.redis_client.lpush('receipts', json.dumps(receipt))
-
-                            for task in pending:
-                                task.cancel()
-
-                            return {
-                                "request_id": request_id,
-                                "timestamp": timestamp,
-                                "miner_keys": [miner['miner_key'] for miner in top_miners],
-                                "query_hash": query_hash,
-                                "query": query,
-                                **existing_response
-                            }
                         else:
-                            responses[result_hash] = (response, [current_miner])
+                            responses[result_hash] = (response, [current_miner], response_time)
 
                     except Exception as e:
-                        logger.error(f"Error querying miner", error=e)
-                        continue
+                        logger.error(f"Error processing miner response", error=e)
 
+            # Aggregate responses and return the first valid one
+            for result_hash, (response, miners, response_time) in responses.items():
+                # Create receipt for the first valid miner
+                first_miner = miners[0]
+                receipt = {
+                    "validator_key": self.key.ss58_address,
+                    "request_id": request_id,
+                    "miner_key": first_miner['miner_key'],
+                    "token": token,
+                    "query": query,
+                    "query_hash": query_hash,
+                    "response_time": response_time,
+                    "timestamp": timestamp.isoformat(),
+                    "result_hash": result_hash,
+                    "result_hash_signature": response['response']['result_hash_signature']
+                }
+                await self.redis_client.lpush('receipts', json.dumps(receipt))
+
+                return {
+                    "request_id": request_id,
+                    "timestamp": timestamp,
+                    "miner_keys": [miner['miner_key'] for miner in miners],
+                    "token": token,
+                    "query": query,
+                    "query_hash": query_hash,
+                    "response_time": response_time,
+                    **response
+                }
+
+            # No valid responses
             return {
                 "request_id": request_id,
                 "timestamp": timestamp,
                 "miner_keys": [],
-                "query_hash": query_hash,
+                "token": token,
                 "query": query,
-                "response": None,
+                "query_hash": query_hash,
+                "response": None
             }
 
         finally:
@@ -729,21 +741,44 @@ class Validator(Module):
             }
 
     async def _query_miner(self, miner, query):
+        """
+        Queries a miner and formats the response to match the expected nested structure.
+
+        Args:
+            miner (dict): Information about the miner (key, address, port).
+            query (str): The query string to be sent.
+
+        Returns:
+            dict: The structured response with nested 'response' key.
+        """
         miner_key = miner['miner_key']
         module_ip = miner['miner_address']
         module_port = int(miner['miner_ip_port'])
         module_client = ModuleClient(module_ip, module_port, self.key)
+
         try:
+            # Call the miner's query endpoint
             query_result = await module_client.call(
                 "query",
                 miner_key,
                 {"query": query, "validator_key": self.key.ss58_address},
                 timeout=self.query_timeout,
             )
-            if not query_result:
+
+            # Validate and structure the response
+            if query_result and "result" in query_result and "result_hash" in query_result and "result_hash_signature" in query_result:
+                # Return the nested response structure
+                return {
+                    "response": {
+                        "result": query_result["result"],
+                        "result_hash": query_result["result_hash"],
+                        "result_hash_signature": query_result["result_hash_signature"]
+                    }
+                }
+            else:
+                logger.warning("Miner's response is incomplete or invalid", miner_key=miner_key)
                 return None
 
-            return query_result
         except Exception as e:
             logger.warning(f"Failed to query miner", error=e, miner_key=miner_key)
             return None

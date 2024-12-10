@@ -1,10 +1,11 @@
 from typing import List, Optional, Dict, Union
+
 from dateutil import parser
 from pydantic import BaseModel
 from sqlalchemy import Column, String, DateTime, update, insert, BigInteger, Boolean, UniqueConstraint, Text, select, \
-    func, text
+    func, text, Index, Float
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import insert, TIMESTAMP
 from datetime import datetime
 from src.subnet.validator.database import OrmBase
 from src.subnet.validator.database.session_manager import DatabaseSessionManager
@@ -15,15 +16,31 @@ Base = declarative_base()
 class MinerReceipt(OrmBase):
     __tablename__ = 'miner_receipts'
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    validator_key = Column(String, nullable=False)
     request_id = Column(String, nullable=False)
     miner_key = Column(String, nullable=False)
     token = Column(String, nullable=False)
     query_hash = Column(Text, nullable=False)
-    accepted = Column(Boolean, nullable=False, default=False)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    query = Column(Text, nullable=True)
+    result_hash = Column(Text, nullable=False)
+    result_hash_signature = Column(Text, nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=True)
+    response_time = Column(Float, nullable=False)
 
     __table_args__ = (
         UniqueConstraint('miner_key', 'request_id', name='uq_miner_key_request_id'),
+
+        Index('idx_miner_receipts_miner_key_timestamp',
+              'miner_key', 'timestamp', postgresql_using='btree'),
+
+        Index('idx_miner_receipts_timestamp',
+              'timestamp', postgresql_using='btree'),
+
+        Index('idx_miner_receipts_validator_key_timestamp',
+              'validator_key', 'timestamp', postgresql_using='btree'),
+
+        Index('idx_miner_receipts_token_timestamp',
+              'token', 'timestamp', postgresql_using='btree'),
     )
 
 
@@ -36,7 +53,7 @@ class MinerReceiptManager:
     def __init__(self, session_manager: DatabaseSessionManager):
         self.session_manager = session_manager
 
-    async def store_miner_receipt(self, request_id: str, miner_key: str, token: str, query_hash: str, timestamp: datetime):
+    async def store_miner_receipt(self, validator_key: str, request_id: str, miner_key: str, token: str, query: str, query_hash: str, response_time: float, timestamp: str, result_hash: str, result_hash_signature: str):
         async with self.session_manager.session() as session:
             async with session.begin():
                 stmt = insert(MinerReceipt).values(
@@ -44,23 +61,27 @@ class MinerReceiptManager:
                     miner_key=miner_key,
                     query_hash=query_hash,
                     token=token,
-                    accepted=False,
-                    timestamp=timestamp
+                    timestamp=datetime.fromisoformat(timestamp),
+                    result_hash=result_hash,
+                    result_hash_signature=result_hash_signature,
+                    validator_key=validator_key,
+                    query=query,
+                    response_time=response_time,
                 )
                 await session.execute(stmt)
 
-    async def accept_miner_receipt(self, request_id: str, miner_key: str):
+    async def sync_miner_receipts(self, receipts: List[Dict[str, Union[str, datetime, bool]]]):
+        for receipt in receipts:
+            if isinstance(receipt['timestamp'], str):
+                receipt['timestamp'] = datetime.fromisoformat(receipt['timestamp'])
+
         async with self.session_manager.session() as session:
             async with session.begin():
-                stmt = update(MinerReceipt).where(
-                    MinerReceipt.request_id == request_id
-                ).where(
-                    MinerReceipt.miner_key == miner_key
-                ).values(accepted=True)
+                stmt = insert(MinerReceipt).values(receipts).on_conflict_do_nothing(
+                    index_elements=['miner_key', 'request_id'])
                 await session.execute(stmt)
 
-    async def get_receipts_by_miner_key(self, miner_key: Optional[str], validator_key: Optional[str], page: int = 1,
-                                        page_size: int = 10):
+    async def get_receipts_by_miner_key(self, miner_key: Optional[str], validator_key: Optional[str], page: int = 1, page_size: int = 10):
         async with self.session_manager.session() as session:
             offset = (page - 1) * page_size
             conditions = []
@@ -119,38 +140,22 @@ class MinerReceiptManager:
                 "total_items": total_items
             }
 
-    async def get_receipt_miner_rank(self, token: str) -> List[ReceiptMinerRank]:
+    async def get_last_receipt_timestamp_for_validator_key(self, validator_key: str) -> dict | None:
         async with self.session_manager.session() as session:
-            query = text("""
-                            WITH miner_ratios AS (
-                                SELECT 
-                                    miner_key,
-                                    COUNT(CASE WHEN accepted = True THEN 1 END) AS accepted_true_count,
-                                    COUNT(CASE WHEN accepted = False THEN 1 END) AS accepted_false_count,
-                                    CASE 
-                                        WHEN COUNT(CASE WHEN accepted = False THEN 1 END) = 0 
-                                        THEN NULL 
-                                        ELSE COUNT(CASE WHEN accepted = True THEN 1 END)::float / COUNT(CASE WHEN accepted = False THEN 1 END)
-                                    END AS ratio
-                                FROM 
-                                    miner_receipts
-                                WHERE 
-                                    timestamp >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND token = :token
-                                GROUP BY 
-                                    miner_key
-                            )
-                            SELECT 
-                                miner_key,
-                                ratio,
-                                RANK() OVER (ORDER BY ratio DESC NULLS LAST) AS rank
-                            FROM 
-                                miner_ratios
-                        """)
+            query = select(MinerReceipt).where(
+                MinerReceipt.validator_key == validator_key
+            ).order_by(
+                MinerReceipt.timestamp.desc()
+            ).limit(1)
 
-            result = await session.execute(query, {"token": token}).fetchone()
-            result = [ReceiptMinerRank(miner_ratio=row['ratio'], miner_rank=row['rank']) for row in result]
+            result = await session.scalar(query)
 
-            return result
+            if result is None:
+                return None
+
+            return {
+                "timestamp": result.timestamp.isoformat()
+            }
 
     async def get_receipts_count_by_tokens(self) -> dict:
         async with self.session_manager.session() as session:
@@ -177,36 +182,29 @@ class MinerReceiptManager:
 
             query = text(f"""
                 WITH total_receipts AS (
-                    SELECT token, COUNT(*) AS total_count
+                    SELECT token, miner_key, COUNT(*) AS total_count
                     FROM miner_receipts
                     WHERE timestamp >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-                    GROUP BY token
+                    {miner_key_filter}
+                    {token_filter}
+                    GROUP BY token, miner_key
                 ),
-                miner_accepted_counts AS (
-                    SELECT 
-                        miner_key,
-                        token,
-                        COUNT(CASE WHEN accepted = True THEN 1 END) AS accepted_true_count
-                    FROM 
-                        miner_receipts
-                    WHERE 
-                        timestamp >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'
-                        {miner_key_filter}
-                        {token_filter}
-                    GROUP BY 
-                        miner_key, token
+                max_receipts_per_token AS (
+                    SELECT token, MAX(total_count) as max_count
+                    FROM total_receipts
+                    GROUP BY token
                 )
                 SELECT 
-                    mac.miner_key,
-                    mac.token,
+                    tr.miner_key,
+                    tr.token,
                     CASE 
-                        WHEN tr.total_count = 0 THEN 0
-                        ELSE POWER(mac.accepted_true_count::float / tr.total_count, 2)
+                        WHEN mrn.max_count = 0 THEN 0
+                        ELSE (tr.total_count::float / mrn.max_count)
                     END AS multiplier
                 FROM 
-                    miner_accepted_counts mac
+                    total_receipts tr
                 JOIN
-                    total_receipts tr ON mac.token = tr.token
+                    max_receipts_per_token mrn ON tr.token = mrn.token
                 ORDER BY multiplier DESC;
             """)
 
@@ -219,4 +217,4 @@ class MinerReceiptManager:
             result = await session.execute(query, params)
             result = result.fetchall()
 
-            return [{ 'miner_key': row[0], 'token': row[1], 'multiplier': row[2]} for row in result]
+            return [{'miner_key': row[0], 'token': row[1], 'multiplier': row[2]} for row in result]

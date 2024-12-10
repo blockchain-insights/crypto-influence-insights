@@ -1,9 +1,11 @@
 import random
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Float, DateTime, update, insert, func, text, delete
+
+from sqlalchemy import Column, Integer, String, Float, DateTime, update, insert, func, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.future import select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import delete
 from datetime import datetime
 
 from src.subnet.validator.database import OrmBase
@@ -12,21 +14,22 @@ from src.subnet.validator.database.session_manager import DatabaseSessionManager
 
 Base = declarative_base()
 
+
 class MinerDiscovery(OrmBase):
     __tablename__ = 'miner_discoveries'
     id = Column(Integer, primary_key=True, autoincrement=True)
     uid = Column(Integer, nullable=False)
     miner_key = Column(String, nullable=False, unique=True)
-    token = Column(String, nullable=False)  # Single token per line
     miner_address = Column(String, nullable=False, default='0.0.0.0')
     miner_ip_port = Column(String, nullable=False, default='0')
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    token = Column(String, nullable=False)
     rank = Column(Float, nullable=False, default=0.0)
     failed_challenges = Column(Integer, nullable=False, default=0)
     total_challenges = Column(Integer, nullable=False, default=0)
-    is_trusted = Column(Integer, nullable=False, default=0)
     version = Column(Float, nullable=False, default=1.0)
     graph_db = Column(String, nullable=False, default='neo4j')
+
 
 class MinerDiscoveryManager:
     def __init__(self, session_manager: DatabaseSessionManager):
@@ -38,9 +41,9 @@ class MinerDiscoveryManager:
                 stmt = insert(MinerDiscovery).values(
                     uid=uid,
                     miner_key=miner_key,
-                    token=token,
                     miner_address=miner_address,
                     miner_ip_port=miner_ip_port,
+                    token=token,
                     timestamp=datetime.utcnow(),
                     version=version,
                     graph_db=graph_db
@@ -50,6 +53,7 @@ class MinerDiscoveryManager:
                         'uid': uid,
                         'miner_address': miner_address,
                         'miner_ip_port': miner_ip_port,
+                        'token': token,
                         'version': version,
                         'graph_db': graph_db,
                         'timestamp': datetime.utcnow()
@@ -63,17 +67,10 @@ class MinerDiscoveryManager:
                 select(MinerDiscovery).where(MinerDiscovery.miner_key == miner_key, MinerDiscovery.token == token)
             )
             miner = result.scalars().first()
-            return to_dict(miner) if miner else None
+            if miner is None:
+                return None
+            return to_dict(miner)
 
-    async def get_miners_by_token(self, token: str):
-        async with self.session_manager.session() as session:
-            result = await session.execute(
-                select(MinerDiscovery)
-                .where(MinerDiscovery.token == token)
-                .order_by(MinerDiscovery.timestamp, MinerDiscovery.rank)
-            )
-            miners = [to_dict(miner) for miner in result.scalars().all()]
-            return miners
 
     async def get_miners_per_token(self):
         async with self.session_manager.session() as session:
@@ -89,6 +86,23 @@ class MinerDiscoveryManager:
             rows = result.fetchall()
 
             return [{'token': row.token, 'count': row.count} for row in rows]
+
+    async def get_miners_by_token(self, token: Optional[str]):
+        if not token:
+            async with self.session_manager.session() as session:
+                result = await session.execute(
+                    select(MinerDiscovery)
+                    .order_by(MinerDiscovery.timestamp, MinerDiscovery.rank)
+                )
+                return [to_dict(result) for result in result.scalars().all()]
+        else:
+            async with self.session_manager.session() as session:
+                result = await session.execute(
+                    select(MinerDiscovery)
+                    .where(MinerDiscovery.token == token)
+                    .order_by(MinerDiscovery.timestamp, MinerDiscovery.rank)
+                )
+                return [to_dict(result) for result in result.scalars().all()]
 
     async def update_miner_rank(self, miner_key: str, new_rank: float):
         async with self.session_manager.session() as session:
@@ -131,8 +145,7 @@ class MinerDiscoveryManager:
                     md.miner_key,
                     CAST(md.timestamp AS VARCHAR) AS timestamp,
                     md.rank,
-                    COALESCE(COUNT(mr.id), 0) AS total_receipts,
-                    COALESCE(SUM(CASE WHEN mr.accepted THEN 1 ELSE 0 END), 0) AS accepted_receipts
+                    COALESCE(COUNT(mr.id), 0) AS total_receipts
                 FROM 
                     miner_discoveries AS md
                 LEFT JOIN 
@@ -154,8 +167,7 @@ class MinerDiscoveryManager:
                     md.token,
                     CAST(md.timestamp AS VARCHAR) AS timestamp,
                     md.rank,
-                    COALESCE(COUNT(mr.id), 0) AS total_receipts,
-                    COALESCE(SUM(CASE WHEN mr.accepted THEN 1 ELSE 0 END), 0) AS accepted_receipts
+                    COALESCE(COUNT(mr.id), 0) AS total_receipts
                 FROM 
                     miner_discoveries AS md
                 LEFT JOIN 
@@ -181,43 +193,10 @@ class MinerDiscoveryManager:
                 tokens = set(miner['token'] for miner in miners)
                 return [
                     {
-                        "token": token,
-                        "data": [miner for miner in miners if miner['token'] == token]
+                        "token": tok,
+                        "data": [miner for miner in miners if miner['token'] == tok]
                     }
-                    for token in tokens
+                    for tok in tokens
                 ]
             else:
                 return {"token": token, "data": miners}
-
-    async def get_miners_for_cross_check(self, token):
-        async with self.session_manager.session() as session:
-            total_miners_result = await session.execute(
-                select(func.count(MinerDiscovery.id)).where(MinerDiscovery.token == token)
-            )
-
-            total_miners = total_miners_result.scalar()
-            limit = int(0.64 * total_miners)
-
-            result = await session.execute(
-                select(MinerDiscovery,
-                       ((
-                                    MinerDiscovery.total_challenges - MinerDiscovery.failed_challenges) / MinerDiscovery.total_challenges).label(
-                           'success_ratio'))
-                .where(MinerDiscovery.token == token, MinerDiscovery.rank > 0.9)
-                .order_by('success_ratio', MinerDiscovery.rank.desc())
-                .limit(limit)
-            )
-
-            miners = [to_dict(row.MinerDiscovery) for row in result.fetchall()]
-            sample_size = int(0.64 * len(miners))
-            selected_miners = random.sample(miners, sample_size)
-
-            # fetch trusted miners for given token and merge results with selected miners
-            trusted_miners_result = await session.execute(
-                select(MinerDiscovery)
-                .where(MinerDiscovery.token == token, MinerDiscovery.is_trusted == 1)
-            )
-            trusted_miners = [to_dict(row.MinerDiscovery) for row in trusted_miners_result.fetchall()]
-
-            final_result: list = selected_miners + trusted_miners
-            return final_result

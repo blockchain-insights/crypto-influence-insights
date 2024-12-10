@@ -46,7 +46,7 @@ else:
 
 def patch_record(record):
     record["extra"]["validator_key"] = keypair.ss58_address
-    record["extra"]["service"] = 'validator-api'
+    record["extra"]["service"] = 'gateway'
     record["extra"]["timestamp"] = datetime.utcnow().isoformat()
     record["extra"]["level"] = record['level'].name
 
