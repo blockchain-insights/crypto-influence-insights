@@ -74,12 +74,15 @@ Now edit the `.env.miner.mainnet` file to set the appropriate configurations:
 NET_UID=22
 MINER_KEY=miner1
 MINER_NAME=miner1
-TOKEN=PEPE
+TOKEN=TAO
 PORT=9962
 
 GRAPH_DATABASE_URL={put_proper_value_here}
 GRAPH_DATABASE_USER={put_proper_value_here}
 GRAPH_DATABASE_PASSWORD={put_proper_value_here}
+
+PINATA_API_KEY={your_pinata_api_key}
+PINATA_SECRET_API_KEY={your_pinata_secret_api_key}
 ```
  
 #### Miner wallet creation
