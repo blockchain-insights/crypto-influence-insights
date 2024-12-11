@@ -77,6 +77,8 @@ DATABASE_URL=postgresql+asyncpg://postgres:changeit456$@localhost:5432/validator
 API_RATE_LIMIT=1000
 REDIS_URL=redis://localhost:6379/0
 
+SNAPSHOT_TIMEOUT=60
+
 PORT=9900
 WORKERS=1
 
@@ -92,7 +94,29 @@ comx key list
 comx module register validator1 validator1 22 --port 9900
 # stake COMAI to your validator wallet
 ```
- 
+
+#### Validator metadata configuration
+
+For validators participating in organic query support (running a gateway), it's necessary to register or update the validator with specific metadata. This metadata includes the gateway endpoint information that other validators will use to sync receipts with your validator.
+
+If you're registering a new validator with metadata:
+```shell
+comx module register validator validator_name 22 --metadata '{"gateway":"http://your-validator-gateway-ip:9900"}'
+```
+
+If you need to update the metadata for an existing validator:
+```shell
+comx module update validator_name 22 --metadata '{"gateway":"http://your-validator-gateway-ip:9900"}'
+```
+
+Replace `validator_name` with your validator's name and adjust the gateway URL to match your validator's actual endpoint. The gateway URL should be accessible from the internet if you want other nodes to be able to query your validator.
+
+Important considerations:
+- Make sure your firewall allows incoming connections to your gateway port
+- Use HTTPS if possible for production environments
+- Ensure the gateway URL is stable and persistent
+- The metadata update is required for participation in the organic query network
+
 
 ### Running the validator and monitoring
 
@@ -116,6 +140,6 @@ pm2 save
 
 ```shell
 cd ~/validator1
-pm2 start ./scripts/run_validator_api.sh --name validator-api
+pm2 start ./scripts/run_gateway.sh --name gateway
 pm2 save
 ```
