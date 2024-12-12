@@ -42,18 +42,17 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
 - **V1.1: Twitter Presence (Completed):**
   - Introduce an endpoint and a Twitter bot to classify influencers by detecting anomalies.
 
-- **V1.2: Snapshot Creation (In Progress):**
+- **V1.2: Snapshot Creation (Completed):**
   - Implement functionality for miners to create snapshots of token data.
-  - Validate snapshots to ensure data quality and prevent malicious contributions before inclusion in the subnet.
 
 ---
 
 ### **V2: Immediate User-Facing Value**
-- **V2.0: Receipt System for Subnet APIs:**
+- **V2.0: Receipt System for Subnet APIs (Completed):**
   - Develop a receipt mechanism for API usage to track work performed by miners, validators, and other subnet participants.
   - Ensure transparency and accountability for all API transactions.
 
-- **V2.1: Public Access APIs for Basic Insights:**
+- **V2.1: Public Access APIs for Basic Insights (In Progress):**
   - Enable end users to query basic information such as:
     - Influencer rankings for specific tokens.
     - Scam alerts based on basic heuristics.

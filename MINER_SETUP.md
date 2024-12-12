@@ -104,7 +104,8 @@ comx module deregister miner1 22
 
 ```shell
 # use pm2 to run the miner
-pm2 start ./scripts/run_miner.sh --name miner1
+
+
 pm2 save
 ```
 
