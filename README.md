@@ -52,18 +52,22 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
   - Develop a receipt mechanism for API usage to track work performed by miners, validators, and other subnet participants.
   - Ensure transparency and accountability for all API transactions.
 
-- **V2.1: Public Access APIs for Basic Insights (In Progress):**
+- **V2.1: Implement Split and Merge Approach for Miner Data (Stage 1) (In Progress)**
+
+- **V2.2: Add Time-Series Data Support (Stage 2)**
+
+- **V2.3: Public Access APIs for Basic Insights:**
   - Enable end users to query basic information such as:
     - Influencer rankings for specific tokens.
     - Scam alerts based on basic heuristics.
   - Provide a free-tier API for public access to attract initial users.
 
-- **V2.2: Real-Time Scam Alerts:**
+- **V2.4: Real-Time Scam Alerts:**
   - Broadcast scam signals in near real-time via:
     - A Twitter bot.
     - Webhook subscriptions for developers and advanced users.
 
-- **V2.3: Token Watchlist Feature:**
+- **V2.5: Token Watchlist Feature:**
   - Allow users to monitor specific tokens and receive:
     - Alerts on influencer activity.
     - Notifications when a token’s risk score changes.
@@ -127,12 +131,6 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
   - Continuously improve APIs and tools based on community feedback.
 
 ---
-
-## **Next Steps**
-1. Finalize and validate **Snapshot Creation** to ensure that miners’ contributions are trustworthy and free from malicious data.
-2. Develop and implement the **Receipt System** to track API work and contributions transparently.
-3. Begin work on **Public Access APIs** and related quick-win functionalities (e.g., scam alerts and token watchlists) once the receipt system is complete.
-4. Engage with the community to provide updates and gather feedback for iterative improvements.
 
 ## Overview
 
