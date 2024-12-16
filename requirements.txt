@@ -1,4 +1,4 @@
-communex==0.1.34.2
+communex
 typer
 uvicorn
 keylimiter
