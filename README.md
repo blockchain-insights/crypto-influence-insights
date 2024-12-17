@@ -38,8 +38,6 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
   - Scrape data for a single token.
   - Provide essential endpoints for token influencer analysis.
   - Deliver APIs for influencer metrics, graph generation, and influencer rankings.
-
-- **V1.1: Twitter Presence (Completed):**
   - Introduce an endpoint and a Twitter bot to classify influencers by detecting anomalies.
 
 - **V1.2: Snapshot Creation (Completed):**
@@ -52,20 +50,37 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
   - Develop a receipt mechanism for API usage to track work performed by miners, validators, and other subnet participants.
   - Ensure transparency and accountability for all API transactions.
 
-- **V2.1: Implement Split and Merge Approach for Miner Data (Stage 1) (In Progress)**
+- **V2.1: Lightweight Miners and Centralized JSON Storage (In Progress):**
+  - **Deprecate Neo4j on Miners**:
+    - Miners will generate raw JSON datasets instead of populating Neo4j.
+  - **Centralized Storage on Validators**:
+    - JSON files uploaded to IPFS will be stored as links in the validator’s discovery table.
+    - Validators will validate, merge, and feed data into **Memgraph** for real-time querying.
+  - **Improved Validator Query System**:
+    - Replace the query logic to pull insights directly from the local Memgraph instance instead of querying miners.
+  - **Scoring Adjustments**:
+    - Update the scoring mechanism to validate and rank JSON-based datasets.
 
-- **V2.2: Add Time-Series Data Support (Stage 2)**
+- **V2.2: Add Time-Series Data Support (Stage 2):**
+  - Integrate **ClickHouse** for efficient storage of historical time-series data.
+  - Enable aggregation of past trends for influencer activity, token mentions, and anomaly detection.
 
 - **V2.3: Public Access APIs for Basic Insights:**
   - Enable end users to query basic information such as:
     - Influencer rankings for specific tokens.
-    - Scam alerts based on basic heuristics.
+    - Scam alerts based on **graph heuristics** (real-time Memgraph insights).
   - Provide a free-tier API for public access to attract initial users.
 
-- **V2.4: Real-Time Scam Alerts:**
-  - Broadcast scam signals in near real-time via:
-    - A Twitter bot.
-    - Webhook subscriptions for developers and advanced users.
+- **V2.4: Real-Time Scam Detection Using Graph-Based ML Models:**
+  - **Model Training**:
+    - Train ML models using **graph data** from Memgraph.
+    - Leverage **Memgraph’s AI ecosystem** for model development (graph embeddings, ML libraries).
+  - **API Integration**:
+    - Expose endpoints that apply trained models for real-time scam detection and influencer behavior scoring.
+  - **Scam Alerts**:
+    - Broadcast real-time scam signals via:
+      - A Twitter bot.
+      - Webhook subscriptions for developers and advanced users.
 
 - **V2.5: Token Watchlist Feature:**
   - Allow users to monitor specific tokens and receive:
@@ -94,12 +109,13 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
 ### **V4: Advanced Detection and Insights**
 - **V4.0: Multi-Token Insights:**
   - Enable querying merged datasets for insights across multiple tokens.
+  - Combine real-time graph analytics (Memgraph) with historical data (ClickHouse).
 
 - **V4.1: Expanded Advanced Detection Features:**
   - **Behavioral Scoring for Influencers:**
     - Analyze posting patterns, sentiment, and historical activity to detect suspicious behavior.
-  - **Scam Campaign Profiling:**
-    - Identify coordinated campaigns and flag for validator review.
+  - **Graph-Enhanced ML Detection**:
+    - Use Memgraph-based models to identify coordinated behavior and anomalies across connected token datasets.
 
 ---
 
@@ -116,7 +132,7 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
 - **LLM Capabilities for Detection:**
   - Add prompts for efficient influencer and scam detection with fuzzy thresholds.
 - **Dedicated Detection Models:**
-  - Train LLMs to improve detection of influencers and scams.
+  - Train LLMs to improve detection of influencers and scams using **hybrid data** from Memgraph and ClickHouse.
 
 ---
 
@@ -131,6 +147,7 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
   - Continuously improve APIs and tools based on community feedback.
 
 ---
+
 
 ## Overview
 
