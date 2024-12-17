@@ -57,7 +57,7 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
     - JSON files uploaded to IPFS will be stored as links in the validator’s discovery table.
     - Validators will validate, merge, and feed data into **Memgraph** for real-time querying.
   - **Improved Validator Query System**:
-    - Replace the query logic to pull insights directly from the local Memgraph instance instead of querying miners.
+    - Replace the query logic to pull insights from the validator's Memgraph instance when the validator is running a gateway.
   - **Scoring Adjustments**:
     - Update the scoring mechanism to validate and rank JSON-based datasets.
 
