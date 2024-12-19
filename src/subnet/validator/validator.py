@@ -297,40 +297,52 @@ class Validator(Module):
         return adjusted_weights
 
     async def validate_step(self, netuid: int, settings: ValidatorSettings) -> None:
-
         score_dict: dict[int, float] = {}
         miners_module_info = {}
 
+        # Get modules and their addresses
         modules = cast(dict[str, Dict], get_map_modules(self.client, netuid=netuid, include_balances=False))
         modules_addresses = self.get_addresses(self.client, netuid)
         ip_ports = get_ip_port(modules_addresses)
 
         raise_exception_if_not_registered(self.key, modules)
 
-        for key in modules.keys():
-            module_meta_data = modules[key]
+        # Populate miners_module_info with valid miners
+        for key, module_meta_data in modules.items():
             uid = module_meta_data['uid']
             if uid not in ip_ports:
                 continue
             module_addr = ip_ports[uid]
-            miners_module_info[uid] = (module_addr, modules[key])
+            miners_module_info[uid] = (module_addr, module_meta_data)
 
         logger.info(f"Found miners", miners_module_info=miners_module_info.keys())
 
+        # Update miner ranks
         for _, miner_metadata in miners_module_info.values():
             await self.miner_discovery_manager.update_miner_rank(miner_metadata['key'], miner_metadata['emission'])
 
-        challenge_tasks = []
-        for uid, miner_info in miners_module_info.items():
-            challenge_tasks.append(self._challenge_miner(miner_info))
+        # Create challenge tasks
+        challenge_tasks = [
+            self._challenge_miner(miner_info)
+            for miner_info in miners_module_info.values()
+        ]
 
-        responses: tuple[TwitterChallengeMinerResponse] = await asyncio.gather(*challenge_tasks)
+        # Gather responses from challenge tasks
+        responses: list[Optional[TwitterChallengeMinerResponse]] = await asyncio.gather(*challenge_tasks)
 
-        for uid, miner_info, response in zip(miners_module_info.keys(), miners_module_info.values(), responses):
-            if not response:
-                score_dict[uid] = 0
-                continue
+        # Filter miners with valid responses
+        valid_miners_info = {
+            uid: miner_info
+            for uid, miner_info, response in zip(miners_module_info.keys(), miners_module_info.values(), responses)
+            if response
+        }
+        valid_responses = [response for response in responses if response]
 
+        logger.info(f"Valid miners after challenges", valid_miners=valid_miners_info.keys())
+
+        # Process valid miners and responses
+        for uid, (miner_info, response) in zip(valid_miners_info.keys(),
+                                               zip(valid_miners_info.values(), valid_responses)):
             if isinstance(response, TwitterChallengeMinerResponse):
                 token = response.token
                 version = response.version
@@ -339,34 +351,38 @@ class Validator(Module):
                 miner_address, miner_ip_port = connection
                 miner_key = miner_metadata['key']
 
+                # Get organic usage and adjust weights
                 organic_usage = await self.miner_receipt_manager.get_receipts_count_by_tokens()
                 adjusted_weights = self.adjust_token_weights_with_min_threshold(organic_usage, min_threshold_ratio=5)
                 logger.debug(f"Adjusted weights", adjusted_weights=adjusted_weights, miner_key=miner_key)
 
-                receipt_miner_multiplier_result = await self.miner_receipt_manager.get_receipt_miner_multiplier(token, miner_key)
-                if not receipt_miner_multiplier_result:
-                    receipt_miner_multiplier = 1
-                else:
-                    receipt_miner_multiplier = receipt_miner_multiplier_result[0]['multiplier']
+                # Get receipt multiplier
+                receipt_miner_multiplier_result = await self.miner_receipt_manager.get_receipt_miner_multiplier(token,
+                                                                                                                miner_key)
+                receipt_miner_multiplier = receipt_miner_multiplier_result[0][
+                    'multiplier'] if receipt_miner_multiplier_result else 1
 
+                # Compute score and weighted score
                 score = self._score_miner(response, receipt_miner_multiplier)
-
-                weighted_score = 0
                 total_weight = sum(adjusted_weights.values())
                 weight = adjusted_weights[response.token]
                 token_influence = weight / total_weight
-                weighted_score += score * token_influence
+                weighted_score = score * token_influence
 
                 assert weighted_score <= 1
                 score_dict[uid] = weighted_score
 
-                await self.miner_discovery_manager.store_miner_metadata(uid, miner_key, miner_address, miner_ip_port, token, version, graph_db)
+                # Store miner metadata and update challenges
+                await self.miner_discovery_manager.store_miner_metadata(uid, miner_key, miner_address, miner_ip_port,
+                                                                        token, version, graph_db)
                 await self.miner_discovery_manager.update_miner_challenges(miner_key, response.failed_challenges, 2)
 
+        # Check if there are valid scores
         if not score_dict:
             logger.info("No miner managed to give a valid answer")
-            return None
+            return
 
+        # Set weights
         try:
             self.set_weights(settings, score_dict, self.netuid, self.client, self.key)
         except Exception as e:
