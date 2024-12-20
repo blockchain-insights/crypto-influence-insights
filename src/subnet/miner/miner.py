@@ -8,12 +8,6 @@ from communex._common import get_node_url
 from communex.client import CommuneClient
 from communex.module import Module, endpoint
 from communex.module._rate_limiters.limiters import IpLimiterParams
-from helpers.file_utils import save_to_file
-from helpers.ipfs_utils import (
-    upload_file_to_pinata,
-    delete_old_snapshots,
-    get_ipfs_link
-    )
 from keylimiter import TokenBucketLimiter
 from loguru import logger
 from starlette.middleware.cors import CORSMiddleware
@@ -22,8 +16,6 @@ from src.subnet.encryption import generate_hash
 from src.subnet.miner._config import MinerSettings, load_environment
 from src.subnet.miner.database.models.dataset_links import DatasetLinkManager
 from src.subnet.miner.database.session_manager import DatabaseSessionManager
-from src.subnet.miner.graph_search import GraphSearch
-from src.subnet.protocol import TwitterChallenge
 from substrateinterface import Keypair
 
 class Miner(Module):
