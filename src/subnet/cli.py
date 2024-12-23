@@ -14,9 +14,6 @@ from src.subnet.validator.database.models.miner_receipt import MinerReceiptManag
 from src.subnet.validator.database.models.tweet_cache import TweetCacheManager
 from src.subnet.validator.database.models.user_cache import UserCacheManager
 from src.subnet.validator.database.session_manager import DatabaseSessionManager, run_migrations
-from src.subnet.validator.receipt_sync import ReceiptSyncWorker
-from src.subnet.validator.receipt_sync_thread import ReceiptSyncThread
-from src.subnet.validator.receipt_worker import ReceiptConsumerThread
 from src.subnet.validator.weights_storage import WeightsStorage
 from src.subnet.validator._config import load_environment, SettingsManager
 from src.subnet.validator.validator import Validator
@@ -84,7 +81,6 @@ if __name__ == "__main__":
     twitter_client = TwitterClient(twitter_round_robbin_token_provider)
     twitter_service = TwitterService(twitter_client)
 
-    receipt_sync_worker = ReceiptSyncWorker(keypair, settings.NET_UID, c_client, miner_receipt_manager)
     redis_client = Redis.from_url(settings.REDIS_URL)
 
     validator = Validator(
@@ -114,31 +110,9 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
-    receipt_consumer_thread = ReceiptConsumerThread(
-        keypair=keypair,
-        settings=settings,
-        terminate_event=validator.terminate_event
-    )
-
-    receipt_consumer_thread.start()
-
-    receipt_sync_thread = ReceiptSyncThread(
-        keypair=keypair,
-        settings=settings,
-        client=c_client,
-        frequency=settings.RECEIPT_SYNC_FREQUENCY,
-        terminate_event=validator.terminate_event
-    )
-    receipt_sync_thread.start()
-
     try:
         asyncio.run(validator.validation_loop(settings))
     except KeyboardInterrupt:
         logger.info("Validator loop interrupted")
 
-    receipt_sync_thread.join()
-    logger.info(f"Receipt sync stopped successfully.")
-
-    receipt_consumer_thread.join()
-    logger.info(f"Receipt consumer stopped successfully.")
 

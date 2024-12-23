@@ -25,17 +25,15 @@ class MinerDiscovery(OrmBase):
     timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     token = Column(String, nullable=False)
     rank = Column(Float, nullable=False, default=0.0)
-    failed_challenges = Column(Integer, nullable=False, default=0)
-    total_challenges = Column(Integer, nullable=False, default=0)
     version = Column(Float, nullable=False, default=1.0)
-    graph_db = Column(String, nullable=False, default='neo4j')
+    ipfs_link = Column(String, nullable=False)  # New field
 
 
 class MinerDiscoveryManager:
     def __init__(self, session_manager: DatabaseSessionManager):
         self.session_manager = session_manager
 
-    async def store_miner_metadata(self, uid: int, miner_key: str, miner_address: str, miner_ip_port: str, token: str, version: float, graph_db: str):
+    async def store_miner_metadata(self, uid: int, miner_key: str, miner_address: str, miner_ip_port: str, token: str, version: float, ipfs_link: str):
         async with self.session_manager.session() as session:
             async with session.begin():
                 stmt = insert(MinerDiscovery).values(
@@ -46,7 +44,7 @@ class MinerDiscoveryManager:
                     token=token,
                     timestamp=datetime.utcnow(),
                     version=version,
-                    graph_db=graph_db
+                    ipfs_link=ipfs_link
                 ).on_conflict_do_update(
                     index_elements=['miner_key'],
                     set_={
@@ -55,7 +53,7 @@ class MinerDiscoveryManager:
                         'miner_ip_port': miner_ip_port,
                         'token': token,
                         'version': version,
-                        'graph_db': graph_db,
+                        'ipfs_link': ipfs_link,
                         'timestamp': datetime.utcnow()
                     }
                 )
@@ -70,7 +68,6 @@ class MinerDiscoveryManager:
             if miner is None:
                 return None
             return to_dict(miner)
-
 
     async def get_miners_per_token(self):
         async with self.session_manager.session() as session:
@@ -112,17 +109,6 @@ class MinerDiscoveryManager:
                 ).values(rank=new_rank)
                 await session.execute(stmt)
 
-    async def update_miner_challenges(self, miner_key: str, failed_challenges_inc: int, total_challenges_inc: int = 2):
-        async with self.session_manager.session() as session:
-            async with session.begin():
-                stmt = update(MinerDiscovery).where(
-                    MinerDiscovery.miner_key == miner_key
-                ).values(
-                    failed_challenges=MinerDiscovery.failed_challenges + failed_challenges_inc,
-                    total_challenges=MinerDiscovery.total_challenges + total_challenges_inc
-                )
-                await session.execute(stmt)
-
     async def remove_all_records(self):
         async with self.session_manager.session() as session:
             async with session.begin():
@@ -138,47 +124,33 @@ class MinerDiscoveryManager:
     async def get_miners_for_leader_board(self, token: Optional[str] = None):
         async with self.session_manager.session() as session:
             if not token:
-                # Raw SQL query without token filter using LEFT JOIN
+                # Raw SQL query without token filter
                 raw_sql = """
                 SELECT 
                     md.token,
                     md.miner_key,
                     CAST(md.timestamp AS VARCHAR) AS timestamp,
                     md.rank,
-                    COALESCE(COUNT(mr.id), 0) AS total_receipts
+                    md.ipfs_link
                 FROM 
                     miner_discoveries AS md
-                LEFT JOIN 
-                    miner_receipts AS mr ON md.miner_key = mr.miner_key
-                GROUP BY 
-                    md.token, 
-                    md.miner_key, 
-                    md.timestamp, 
-                    md.rank
                 ORDER BY 
                     md.timestamp DESC, 
                     md.rank DESC;
                 """
             else:
-                # Raw SQL query with token filter using LEFT JOIN
+                # Raw SQL query with token filter
                 raw_sql = """
                 SELECT 
                     md.id,
                     md.token,
                     CAST(md.timestamp AS VARCHAR) AS timestamp,
                     md.rank,
-                    COALESCE(COUNT(mr.id), 0) AS total_receipts
+                    md.ipfs_link
                 FROM 
                     miner_discoveries AS md
-                LEFT JOIN 
-                    miner_receipts AS mr ON md.miner_key = mr.miner_key
                 WHERE 
                     md.token = :token
-                GROUP BY 
-                    md.id,
-                    md.token, 
-                    md.timestamp, 
-                    md.rank
                 ORDER BY 
                     md.timestamp DESC, 
                     md.rank DESC;

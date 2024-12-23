@@ -45,6 +45,8 @@ class ValidatorSettings(BaseSettings):
 
     TWITTER_BEARER_TOKENS: str
 
+    ENABLE_GATEWAY: bool = False
+
     PORT: int = 9900
     WORKERS: int = 4
 

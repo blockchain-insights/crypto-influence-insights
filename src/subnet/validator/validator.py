@@ -1,35 +1,24 @@
-import asyncio
-import json
-import random
 import threading
 import time
-import traceback
-import uuid
-from datetime import datetime, timezone
-from random import sample
+from datetime import datetime
 from typing import cast, Dict, Optional
 
 from aioredis import Redis
 from communex.client import CommuneClient  # type: ignore
-from communex.errors import NetworkTimeoutError
 from communex.misc import get_map_modules
 from communex.module.client import ModuleClient  # type: ignore
 from communex.module.module import Module  # type: ignore
 from communex.types import Ss58Address  # type: ignore
+from helpers.ipfs_utils import fetch_file_from_ipfs
 from loguru import logger
 from substrateinterface import Keypair  # type: ignore
-from ._config import ValidatorSettings, load_base_weights
+from ._config import ValidatorSettings
 
-from .encryption import generate_hash
-from .helpers import raise_exception_if_not_registered, get_ip_port, cut_to_max_allowed_weights
+from src.subnet.validator.helpers.helpers import raise_exception_if_not_registered, get_ip_port, cut_to_max_allowed_weights, validate_json_dataset, score_dataset
 from .weights_storage import WeightsStorage
 from src.subnet.validator.database.models.miner_discovery import MinerDiscoveryManager
-from src.subnet.validator.database.models.miner_receipt import MinerReceiptManager
-from src.subnet.validator.database.models.tweet_cache import TweetCacheManager
-from src.subnet.validator.database.models.user_cache import UserCacheManager
-from src.subnet.protocol import TwitterChallenge, TwitterChallengesResponse, TwitterChallengeMinerResponse, Discovery
+from src.subnet.protocol import Discovery
 from .. import VERSION
-from .twitter import TwitterService, TwitterUser
 
 
 class Validator(Module):
@@ -41,32 +30,21 @@ class Validator(Module):
             client: CommuneClient,
             weights_storage: WeightsStorage,
             miner_discovery_manager: MinerDiscoveryManager,
-            miner_receipt_manager: MinerReceiptManager,
-            tweet_cache_manager: TweetCacheManager,
-            user_cache_manager: UserCacheManager,
-            twitter_service: TwitterService,
             redis_client: Redis,
-            query_timeout: int = 60,
-            challenge_timeout: int = 60,
-            snapshot_timeout: int = 60
-
+            settings: ValidatorSettings
     ) -> None:
         super().__init__()
 
-        self.miner_receipt_manager = miner_receipt_manager
         self.client = client
         self.key = key
         self.netuid = netuid
-        self.challenge_timeout = challenge_timeout
-        self.query_timeout = query_timeout
-        self.snapshot_timeout = snapshot_timeout
+        self.query_timeout = settings.QUERY_TIMEOUT
+        self.snapshot_timeout = settings.SNAPSHOT_TIMEOUT
         self.weights_storage = weights_storage
         self.miner_discovery_manager = miner_discovery_manager
-        self.tweet_cache_manager = tweet_cache_manager
-        self.user_cache_manager = user_cache_manager
-        self.twitter_service = twitter_service
         self.terminate_event = threading.Event()
         self.redis_client = redis_client
+        self.enable_gateway = settings.ENABLE_GATEWAY
 
     @staticmethod
     def get_addresses(client: CommuneClient, netuid: int) -> dict[int, str]:
@@ -78,223 +56,79 @@ class Validator(Module):
         logger.debug(f"Got modules addresses", modules_adresses=modules_adresses)
         return modules_adresses
 
-    async def _challenge_miner(self, miner_info):
-        start_time = time.time()
-        try:
-            connection, miner_metadata = miner_info
-            module_ip, module_port = connection
-            miner_key = miner_metadata['key']
-            client = ModuleClient(module_ip, int(module_port), self.key)
-
-            logger.info(f"Challenging miner", miner_key=miner_key)
-
-            # Discovery Phase
-            discovery = await self._get_discovery(client, miner_key)
-            if not discovery:
-                return None
-
-            logger.debug(f"Got discovery for miner", miner_key=miner_key)
-
-            # Challenge Phase
-            challenge_response = await self._perform_challenges(client, miner_key, discovery)
-            if not challenge_response:
-                return None
-
-            return challenge_response
-        except Exception as e:
-            logger.error(f"Failed to challenge miner", error=e, miner_key=miner_key)
-            return None
-        finally:
-            end_time = time.time()
-            execution_time = end_time - start_time
-            logger.info(f"Execution time for challenge_miner", execution_time=execution_time, miner_key=miner_key)
-
-    async def _get_discovery(self, client, miner_key) -> Discovery:
+    async def _get_discovery(self, client, miner_key) -> Optional[Discovery]:
         try:
             discovery = await client.call(
                 "discovery",
                 miner_key,
                 {"validator_version": str(VERSION), "validator_key": self.key.ss58_address},
-                timeout=self.challenge_timeout,
+                timeout=self.query_timeout,
             )
-
             return Discovery(**discovery)
         except Exception as e:
             logger.info(f"Miner failed to get discovery", miner_key=miner_key, error=e)
             return None
 
-    async def _perform_challenges(self, client, miner_key, discovery) -> Optional[TwitterChallengeMinerResponse]:
+    async def _fetch_and_validate_dataset(self, dataset_link: str) -> Optional[Dict]:
         """
-        Executes a Twitter challenge using TwitterService to check existence of tweet and user IDs,
-        and validates user_id, tweet_id, and tweet creation date. Utilizes cache where available.
+        Fetches the dataset from the provided IPFS link and validates its structure and integrity.
+
+        Args:
+            dataset_link (str): The IPFS link to the dataset.
+
+        Returns:
+            Optional[Dict]: The validated dataset or None if invalid.
         """
         try:
-            # Call the miner's challenge endpoint to retrieve Twitter data
-            challenge = TwitterChallenge(token=discovery.token)
-            challenge_data = await client.call(
-                "challenge",
-                miner_key,
-                {"challenge": challenge.model_dump(), "validator_key": self.key.ss58_address},
-                timeout=self.challenge_timeout,
-            )
+            logger.info(f"Fetching dataset from IPFS: {dataset_link}")
+            # Replace this with actual fetching logic
+            dataset = await self.fetch_dataset(dataset_link)
+            if not dataset:
+                logger.error("Failed to fetch dataset.")
+                return None
 
-            token = challenge_data.get("token", discovery.token)
-            actual_data = challenge_data.get("output", {})  # Data provided by the miner
+            if not validate_json_dataset(dataset):
+                logger.error("Dataset validation failed.")
+                return None
 
-            tweet_id = actual_data.get("tweet_id")
-            user_id = actual_data.get("user_id")
-            actual_tweet_date = actual_data.get("tweet_date")
-
-            failed_challenges = 0
-            expected_data = {}
-
-            # Retrieve tweet data from cache or API
-            tweet_data = await self.tweet_cache_manager.get_tweet_cache(tweet_id)
-            if tweet_data:
-                logger.info(f"Tweet data retrieved from cache for tweet_id {tweet_id}")
-                expected_data["tweet_date"] = tweet_data["tweet_date"]
-                expected_data["tweet_id"] = tweet_id
-            else:
-                tweet_data = self.twitter_service.get_tweet_details(tweet_id) if tweet_id else None
-                if tweet_data:
-                    # Ensure consistent storage format: convert to UTC and remove timezone
-                    tweet_date = (
-                        datetime.fromisoformat(tweet_data.created_at.replace("Z", "+00:00")).astimezone(
-                            timezone.utc).replace(tzinfo=None)
-                        if isinstance(tweet_data.created_at, str)
-                        else tweet_data.created_at.astimezone(timezone.utc).replace(tzinfo=None)
-                    )
-                    expected_data["tweet_date"] = tweet_date.isoformat()
-                    expected_data["tweet_id"] = tweet_id
-
-                    # Store tweet data in cache
-                    await self.tweet_cache_manager.store_tweet_cache(tweet_id=tweet_id, tweet_date=tweet_date)
-                else:
-                    failed_challenges += 1
-                    logger.warning(f"Tweet not found on Twitter for tweet_id {tweet_id}")
-
-            # Validate tweet date
-            if "tweet_date" in expected_data:
-                try:
-                    # Convert both actual and expected dates to UTC and make them timezone-naive
-                    expected_date = datetime.fromisoformat(expected_data["tweet_date"])
-                    actual_date = datetime.fromisoformat(actual_tweet_date.replace("Z", "+00:00")).astimezone(
-                        timezone.utc).replace(tzinfo=None)
-
-                    if actual_date != expected_date:
-                        failed_challenges += 1
-                        logger.warning(f"Tweet date mismatch: expected {expected_date}, got {actual_date}")
-                except ValueError:
-                    failed_challenges += 1
-                    logger.error(f"Invalid tweet date format: {actual_tweet_date}")
-
-            # Retrieve user data from cache or API
-            user_data = await self.user_cache_manager.get_user_cache(user_id)
-            if user_data:
-                logger.info(f"User data retrieved from cache for user_id {user_id}")
-                expected_data["user_id"] = user_id
-            else:
-                user_data = self.twitter_service.get_user_details(user_id) if user_id else None
-                if user_data:
-                    expected_data["user_id"] = user_id
-
-                    # Store user data in cache
-                    await self.user_cache_manager.store_user_cache(
-                        user_id=user_id, follower_count=user_data.followers_count, verified=user_data.verified
-                    )
-                else:
-                    failed_challenges += 1
-                    logger.warning(f"User not found on Twitter for user_id {user_id}")
-
-            # Construct TwitterChallengesResponse
-            challenge_response = TwitterChallengesResponse(
-                token=token,
-                output=actual_data  # Here `output` contains the data received from the miner
-            )
-
-            # Return with failed challenge count
-            return TwitterChallengeMinerResponse(
-                token=token,
-                version=discovery.version,
-                graph_db=discovery.graph_db,
-                challenge_response=challenge_response,
-                failed_challenges=failed_challenges
-            )
-
+            return dataset
         except Exception as e:
-            logger.error(f"Failed to perform Twitter challenge", error=e, miner_key=miner_key)
+            logger.error(f"Error fetching or validating dataset: {e}")
             return None
 
     @staticmethod
-    def _score_miner(response: TwitterChallengeMinerResponse, receipt_miner_multiplier: float) -> float:
-        if not response:
-            logger.debug("Skipping empty response")
-            return 0
+    def parse_dataset(file_content: str) -> dict:
+        """
+        Parse the dataset content into a dictionary.
 
-        failed_challenges = response.failed_challenges
+        Args:
+            file_content (str): Content of the dataset file.
 
-        # Base scoring based on failed challenges (up to 3 possible)
-        base_score = 1.0  # Perfect score for no failures
-        if failed_challenges == 3:
-            base_score = 0  # Full failure, no score
-        elif failed_challenges == 2:
-            base_score = 0.3  # Significant issues
-        elif failed_challenges == 1:
-            base_score = 0.7  # Near-perfect, only one minor issue
-
-        # Convert follower_count to int, if possible
-        follower_count_str = response.challenge_response.output.get("follower_count", "0")
+        Returns:
+            dict: Parsed dataset.
+        """
+        import json
         try:
-            follower_count = int(follower_count_str)
-        except ValueError:
-            follower_count = 0  # Default to 0 if conversion fails
+            return json.loads(file_content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse dataset content: {str(e)}")
 
-        # Additional bonus for follower count above threshold
-        follower_bonus = 0.1 if follower_count > 1000 else 0
+    def fetch_dataset(ipfs_hash: str) -> dict:
+        """
+        Retrieve a dataset file from IPFS and return its content.
 
-        # Final score after applying bonuses and receipt multiplier
-        final_score = (base_score + follower_bonus) * min(1.0, receipt_miner_multiplier)
+        Args:
+            ipfs_hash (str): The IPFS hash of the dataset file.
 
-        return min(final_score, 1.0)  # Ensure score does not exceed 1.0
-
-    @staticmethod
-    def adjust_token_weights_with_min_threshold(organic_prompts, min_threshold_ratio=5):
-        base_weights = load_base_weights()
-        total_base_weight = sum(base_weights.values())
-        normalized_base_weights = {k: (v / total_base_weight) * 100 for k, v in base_weights.items()}
-        num_tokens = len(base_weights)
-        min_threshold = 100 / min_threshold_ratio  # Minimum threshold percentage
-        total_prompts = sum(organic_prompts.values())
-
-        adjusted_weights = {}
-
-        if total_prompts == 0:
-            adjusted_weights = normalized_base_weights.copy()
-        else:
-            for token in normalized_base_weights.keys():
-                organic_ratio = organic_prompts.get(token, 0) / total_prompts
-                adjusted_weight = normalized_base_weights[token] * organic_ratio
-
-                if adjusted_weight < min_threshold:
-                    adjusted_weights[token] = min_threshold
-                else:
-                    adjusted_weights[token] = adjusted_weight
-
-            total_adjusted_weight = sum(adjusted_weights.values())
-
-            if total_adjusted_weight > 100:
-                weight_above_min = total_adjusted_weight - (min_threshold * num_tokens)
-                if weight_above_min > 0:
-                    scale_factor = (100 - (min_threshold * num_tokens)) / weight_above_min
-                    for token in adjusted_weights.keys():
-                        if adjusted_weights[token] > min_threshold:
-                            adjusted_weights[token] = min_threshold + (
-                                        adjusted_weights[token] - min_threshold) * scale_factor
-                else:
-                    for token in adjusted_weights.keys():
-                        adjusted_weights[token] = min_threshold
-
-        return adjusted_weights
+        Returns:
+            dict: Dataset content as a dictionary.
+        """
+        try:
+            file_content = fetch_file_from_ipfs(ipfs_hash)
+            dataset = Validator.parse_dataset(file_content)
+            return dataset
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch and parse dataset: {str(e)}")
 
     async def validate_step(self, netuid: int, settings: ValidatorSettings) -> None:
         score_dict: dict[int, float] = {}
@@ -317,87 +151,58 @@ class Validator(Module):
 
         logger.info(f"Found miners", miners_module_info=miners_module_info.keys())
 
-        # Update miner ranks
-        for _, miner_metadata in miners_module_info.values():
-            await self.miner_discovery_manager.update_miner_rank(miner_metadata['key'], miner_metadata['emission'])
+        # Process miners
+        valid_uids = set()
+        for uid, miner_info in miners_module_info.items():
+            connection, miner_metadata = miner_info
+            miner_key = miner_metadata['key']
 
-        # Create challenge tasks
-        challenge_tasks = [
-            self._challenge_miner(miner_info)
-            for miner_info in miners_module_info.values()
-        ]
+            # Perform discovery and dataset validation
+            discovery = await self._get_discovery(self.client, miner_key)
+            if not discovery or not discovery.dataset_link:
+                logger.warning(f"No dataset link found for miner {miner_key}. Excluding from scoring.")
+                continue
 
-        # Gather responses from challenge tasks
-        responses: list[Optional[TwitterChallengeMinerResponse]] = await asyncio.gather(*challenge_tasks)
+            # Store discovered miner metadata
+            await self.miner_discovery_manager.store_miner_metadata(
+                uid=uid,
+                miner_key=miner_key,
+                miner_address=connection[0],
+                miner_ip_port=connection[1],
+                token=discovery.token,
+                version=discovery.version,
+                ipfs_link=discovery.dataset_link
+            )
 
-        # Filter miners with valid responses
-        valid_miners_info = {
-            uid: miner_info
-            for uid, miner_info, response in zip(miners_module_info.keys(), miners_module_info.values(), responses)
-            if response
-        }
-        valid_responses = [response for response in responses if response]
+            dataset = await self._fetch_and_validate_dataset(discovery.dataset_link)
+            if not dataset:
+                logger.warning(f"Invalid dataset for miner {miner_key}. Excluding from scoring.")
+                continue
 
-        logger.info(f"Valid miners after challenges", valid_miners=valid_miners_info.keys())
+            # Score dataset
+            scores = score_dataset(dataset)
+            total_score = sum(scores.values()) / len(scores)
+            score_dict[uid] = total_score
+            valid_uids.add(uid)
 
-        # Process valid miners and responses
-        for uid, (miner_info, response) in zip(valid_miners_info.keys(),
-                                               zip(valid_miners_info.values(), valid_responses)):
-            if isinstance(response, TwitterChallengeMinerResponse):
-                token = response.token
-                version = response.version
-                graph_db = response.graph_db
-                connection, miner_metadata = miner_info
-                miner_address, miner_ip_port = connection
-                miner_key = miner_metadata['key']
+        # Log excluded miners
+        excluded_uids = set(miners_module_info.keys()) - valid_uids
+        if excluded_uids:
+            logger.info(f"Excluded miners: {excluded_uids}")
 
-                # Get organic usage and adjust weights
-                organic_usage = await self.miner_receipt_manager.get_receipts_count_by_tokens()
-                adjusted_weights = self.adjust_token_weights_with_min_threshold(organic_usage, min_threshold_ratio=5)
-                logger.debug(f"Adjusted weights", adjusted_weights=adjusted_weights, miner_key=miner_key)
+        # Set weights based on scores
+        if score_dict:
+            try:
+                self.set_weights(settings, score_dict, self.netuid, self.client, self.key)
+            except Exception as e:
+                logger.error(f"Failed to set weights", error=e)
+        else:
+            logger.info("No valid miners found in this validation step.")
 
-                # Get receipt multiplier
-                receipt_miner_multiplier_result = await self.miner_receipt_manager.get_receipt_miner_multiplier(token,
-                                                                                                                miner_key)
-                receipt_miner_multiplier = receipt_miner_multiplier_result[0][
-                    'multiplier'] if receipt_miner_multiplier_result else 1
-
-                # Compute score and weighted score
-                score = self._score_miner(response, receipt_miner_multiplier)
-                total_weight = sum(adjusted_weights.values())
-                weight = adjusted_weights[response.token]
-                token_influence = weight / total_weight
-                weighted_score = score * token_influence
-
-                assert weighted_score <= 1
-                score_dict[uid] = weighted_score
-
-                # Store miner metadata and update challenges
-                await self.miner_discovery_manager.store_miner_metadata(uid, miner_key, miner_address, miner_ip_port,
-                                                                        token, version, graph_db)
-                await self.miner_discovery_manager.update_miner_challenges(miner_key, response.failed_challenges, 2)
-
-        # Check if there are valid scores
-        if not score_dict:
-            logger.info("No miner managed to give a valid answer")
-            return
-
-        # Set weights
-        try:
-            self.set_weights(settings, score_dict, self.netuid, self.client, self.key)
-        except Exception as e:
-            logger.error(f"Failed to set weights", error=e)
-
-    def set_weights(self,
-                    settings: ValidatorSettings,
-                    score_dict: dict[
-                        int, float
-                    ],
-                    netuid: int,
-                    client: CommuneClient,
-                    key: Keypair,
-                    ) -> None:
-
+    def set_weights(self, settings: ValidatorSettings, score_dict: dict[int, float], netuid: int, client: CommuneClient, key: Keypair) -> None:
+        """
+        Calculate and set weights for miners based on their scores.
+        """
         score_dict = cut_to_max_allowed_weights(score_dict, settings.MAX_ALLOWED_WEIGHTS)
         self.weights_storage.setup()
         weighted_scores: dict[int, int] = self.weights_storage.read()
@@ -406,434 +211,29 @@ class Validator(Module):
         score_sum = sum(score_dict.values())
 
         for uid, score in score_dict.items():
-            if score_sum == 0:
-                weight = 0
-                weighted_scores[uid] = weight
-            else:
-                weight = int(score * 1000 / score_sum)
-                weighted_scores[uid] = weight
-
-        weighted_scores = {k: v for k, v in weighted_scores.items() if k in score_dict}
+            weight = int(score * 1000 / score_sum) if score_sum > 0 else 0
+            weighted_scores[uid] = weight
 
         self.weights_storage.store(weighted_scores)
 
         uids = list(weighted_scores.keys())
         weights = list(weighted_scores.values())
 
-        if len(weighted_scores) > 0:
+        if uids:
             client.vote(key=key, uids=uids, weights=weights, netuid=netuid)
 
         logger.info("Set weights", action="set_weight", timestamp=datetime.utcnow().isoformat(), weighted_scores=weighted_scores)
 
     async def validation_loop(self, settings: ValidatorSettings) -> None:
+        """
+        Continuous validation loop with intervals.
+        """
         while not self.terminate_event.is_set():
             start_time = time.time()
             await self.validate_step(self.netuid, settings)
-            if self.terminate_event.is_set():
-                logger.info("Terminating validation loop")
-                break
 
             elapsed = time.time() - start_time
             if elapsed < settings.ITERATION_INTERVAL:
                 sleep_time = settings.ITERATION_INTERVAL - elapsed
                 logger.info(f"Sleeping for {sleep_time}")
                 self.terminate_event.wait(sleep_time)
-                if self.terminate_event.is_set():
-                    logger.info("Terminating validation loop")
-                    break
-
-    async def query_miner(self, token: str, query: str, miner_key: Optional[str]) -> dict:
-        request_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow()
-        query_hash = generate_hash(query)
-
-        # Single miner case
-        if miner_key:
-            miner = await self.miner_discovery_manager.get_miner_by_key(miner_key, token)
-            if not miner:
-                return {
-                    "request_id": request_id,
-                    "timestamp": timestamp,
-                    "miner_keys": None,
-                    "token": token,
-                    "query": query,
-                    "query_hash": query_hash,
-                    "response": []
-                }
-
-            start_time = time.time()
-            response = await self._query_miner(miner, query)
-            response_time = round(time.time() - start_time, 3)
-
-            if response:
-                # Extract and recompute the hash
-                result = response['response']['result']
-                result_hash = response['response']['result_hash']
-                result_hash_signature = response['response']['result_hash_signature']
-
-                recomputed_hash = generate_hash(str(result))
-                if recomputed_hash != result_hash:
-                    logger.warning("Integrity check failed: recomputed hash does not match miner's hash")
-                    return {
-                        "request_id": request_id,
-                        "timestamp": timestamp,
-                        "miner_keys": [miner_key],
-                        "token": token,
-                        "query": query,
-                        "query_hash": query_hash,
-                        "response": None
-                    }
-
-                # Authenticity check
-                miner_key_pair = Keypair(ss58_address=miner_key)
-                if not miner_key_pair.verify(recomputed_hash.encode('utf-8'), bytes.fromhex(result_hash_signature)):
-                    logger.warning(f"Invalid result hash signature", miner_key=miner_key)
-                    return {
-                        "request_id": request_id,
-                        "timestamp": timestamp,
-                        "miner_keys": [miner_key],
-                        "token": token,
-                        "query": query,
-                        "query_hash": query_hash,
-                        "response": None
-                    }
-
-                # Push receipt to Redis
-                receipt = {
-                    "validator_key": self.key.ss58_address,
-                    "request_id": request_id,
-                    "miner_key": miner_key,
-                    "token": token,
-                    "query": query,
-                    "query_hash": query_hash,
-                    "response_time": response_time,
-                    "timestamp": timestamp.isoformat(),
-                    "result_hash": result_hash,
-                    "result_hash_signature": result_hash_signature
-                }
-                await self.redis_client.lpush('receipts', json.dumps(receipt))
-
-                return {
-                    "request_id": request_id,
-                    "timestamp": timestamp,
-                    "miner_keys": [miner_key],
-                    "token": token,
-                    "query": query,
-                    "query_hash": query_hash,
-                    "response_time": response_time,
-                    **response
-                }
-
-            return {
-                "request_id": request_id,
-                "timestamp": timestamp,
-                "miner_keys": [miner_key],
-                "token": token,
-                "query": query,
-                "query_hash": query_hash,
-                "response": None
-            }
-
-        # Multiple miners case
-        select_count = 3
-        sample_size = 16
-
-        miners = await self.miner_discovery_manager.get_miners_by_token(token)
-        if len(miners) == 0:
-            return {
-                "request_id": request_id,
-                "timestamp": timestamp,
-                "miner_keys": [],
-                "token": token,
-                "query": query,
-                "query_hash": query_hash,
-                "response": None
-            }
-
-        top_miners = miners[:sample_size] if len(miners) <= select_count else random.sample(miners[:sample_size],
-                                                                                            select_count)
-        responses = {}
-
-        query_tasks = {
-            asyncio.create_task(self._query_miner(miner, query)): (miner, time.time())
-            for miner in top_miners
-        }
-
-        try:
-            pending = set(query_tasks.keys())
-            start_time = time.time()
-
-            while pending:
-                if time.time() - start_time > self.query_timeout:
-                    break
-
-                done, pending = await asyncio.wait(
-                    pending,
-                    timeout=max(0.0, self.query_timeout - (time.time() - start_time)),
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-
-                for completed_task in done:
-                    try:
-                        response = await completed_task
-                        current_miner, task_start_time = query_tasks[completed_task]
-                        response_time = round(time.time() - task_start_time, 3)
-
-                        if not response:
-                            continue
-
-                        # Extract response components
-                        result = response['response']['result']
-                        result_hash = response['response']['result_hash']
-                        result_hash_signature = response['response']['result_hash_signature']
-
-                        # Integrity check
-                        recomputed_hash = generate_hash(str(result))
-                        if recomputed_hash != result_hash:
-                            logger.warning("Integrity check failed: recomputed hash does not match miner's hash")
-                            continue
-
-                        # Authenticity check
-                        miner_key = current_miner['miner_key']
-                        miner_key_pair = Keypair(ss58_address=miner_key)
-                        if not miner_key_pair.verify(recomputed_hash.encode('utf-8'),
-                                                     bytes.fromhex(result_hash_signature)):
-                            logger.warning(f"Invalid result hash signature", miner_key=miner_key)
-                            continue
-
-                        # Add or update the response
-                        if result_hash in responses:
-                            existing_response, existing_miners = responses[result_hash]
-                            existing_miners.append(current_miner)
-                        else:
-                            responses[result_hash] = (response, [current_miner], response_time)
-
-                    except Exception as e:
-                        logger.error(f"Error processing miner response", error=e)
-
-            # Aggregate responses and return the first valid one
-            for result_hash, (response, miners, response_time) in responses.items():
-                # Create receipt for the first valid miner
-                first_miner = miners[0]
-                receipt = {
-                    "validator_key": self.key.ss58_address,
-                    "request_id": request_id,
-                    "miner_key": first_miner['miner_key'],
-                    "token": token,
-                    "query": query,
-                    "query_hash": query_hash,
-                    "response_time": response_time,
-                    "timestamp": timestamp.isoformat(),
-                    "result_hash": result_hash,
-                    "result_hash_signature": response['response']['result_hash_signature']
-                }
-                await self.redis_client.lpush('receipts', json.dumps(receipt))
-
-                return {
-                    "request_id": request_id,
-                    "timestamp": timestamp,
-                    "miner_keys": [miner['miner_key'] for miner in miners],
-                    "token": token,
-                    "query": query,
-                    "query_hash": query_hash,
-                    "response_time": response_time,
-                    **response
-                }
-
-            # No valid responses
-            return {
-                "request_id": request_id,
-                "timestamp": timestamp,
-                "miner_keys": [],
-                "token": token,
-                "query": query,
-                "query_hash": query_hash,
-                "response": None
-            }
-
-        finally:
-            for task in query_tasks.keys():
-                if not task.done():
-                    task.cancel()
-
-    async def fetch_snapshot(self, token: str, from_date: str, to_date: str, miner_key: Optional[str]) -> dict:
-        """
-        Fetches a snapshot from one or more miners for a given token and date range.
-
-        Args:
-            token (str): The token name to filter by.
-            from_date (str): Start date for filtering (YYYY-MM-DD).
-            to_date (str): End date for filtering (YYYY-MM-DD).
-            miner_key (Optional[str]): Specific miner key to query. If None, multiple miners are sampled.
-
-        Returns:
-            dict: Snapshot results with metadata.
-        """
-        request_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow()
-
-        if miner_key:
-            # Fetch snapshot from a specific miner
-            miner = await self.miner_discovery_manager.get_miner_by_key(miner_key, token)
-            if not miner:
-                return {
-                    "request_id": request_id,
-                    "timestamp": timestamp,
-                    "miner_keys": None,
-                    "token": token,
-                    "from_date": from_date,
-                    "to_date": to_date,
-                    "response": []
-                }
-
-            response = await self._get_snapshot(miner, token, from_date, to_date)
-
-            return {
-                "request_id": request_id,
-                "timestamp": timestamp,
-                "miner_keys": [miner_key],
-                "token": token,
-                "from_date": from_date,
-                "to_date": to_date,
-                "response": response or {"error": "Snapshot generation failed"}
-            }
-
-        else:
-            # Fetch snapshot from multiple miners
-            select_count = 3
-            sample_size = 16
-            miners = await self.miner_discovery_manager.get_miners_by_token(token)
-
-            if not miners:
-                return {
-                    "request_id": request_id,
-                    "timestamp": timestamp,
-                    "miner_keys": None,
-                    "token": token,
-                    "from_date": from_date,
-                    "to_date": to_date,
-                    "response": {"error": "No miners available for the token"}
-                }
-
-            if len(miners) < select_count:
-                top_miners = miners
-            else:
-                top_miners = random.sample(miners[:sample_size], select_count)
-
-            snapshot_tasks = [self._get_snapshot(miner, token, from_date, to_date) for miner in top_miners]
-            responses = await asyncio.gather(*snapshot_tasks)
-
-            # Combine miners with their responses
-            combined_responses = list(zip(top_miners, responses))
-
-            # Filter out failed responses (None)
-            successful_responses = [resp for miner, resp in combined_responses if resp is not None]
-
-            if not successful_responses:
-                # If no successful responses, return an error
-                return {
-                    "request_id": request_id,
-                    "timestamp": timestamp,
-                    "miner_keys": [miner['miner_key'] for miner in top_miners],
-                    "token": token,
-                    "from_date": from_date,
-                    "to_date": to_date,
-                    "response": {"error": "All snapshot requests failed"}
-                }
-
-            # Randomly select a successful response
-            miner, random_response = random.choice([
-                (miner, resp) for miner, resp in combined_responses if resp is not None
-            ])
-
-            return {
-                "request_id": request_id,
-                "timestamp": timestamp,
-                "miner_keys": [miner['miner_key'] for miner in top_miners],
-                "token": token,
-                "from_date": from_date,
-                "to_date": to_date,
-                "response": random_response
-            }
-
-    async def _query_miner(self, miner, query):
-        """
-        Queries a miner and formats the response to match the expected nested structure.
-
-        Args:
-            miner (dict): Information about the miner (key, address, port).
-            query (str): The query string to be sent.
-
-        Returns:
-            dict: The structured response with nested 'response' key.
-        """
-        miner_key = miner['miner_key']
-        module_ip = miner['miner_address']
-        module_port = int(miner['miner_ip_port'])
-        module_client = ModuleClient(module_ip, module_port, self.key)
-
-        try:
-            # Call the miner's query endpoint
-            query_result = await module_client.call(
-                "query",
-                miner_key,
-                {"query": query, "validator_key": self.key.ss58_address},
-                timeout=self.query_timeout,
-            )
-
-            # Validate and structure the response
-            if query_result and "result" in query_result and "result_hash" in query_result and "result_hash_signature" in query_result:
-                # Return the nested response structure
-                return {
-                    "response": {
-                        "result": query_result["result"],
-                        "result_hash": query_result["result_hash"],
-                        "result_hash_signature": query_result["result_hash_signature"]
-                    }
-                }
-            else:
-                logger.warning("Miner's response is incomplete or invalid", miner_key=miner_key)
-                return None
-
-        except Exception as e:
-            logger.warning(f"Failed to query miner", error=e, miner_key=miner_key)
-            return None
-
-    async def _get_snapshot(self, miner, token: str, from_date: str, to_date: str):
-        """
-        Calls the miner's export_snapshot endpoint to fetch a snapshot.
-
-        Args:
-            miner (dict): Dictionary containing miner information (key, address, port).
-            token (str): The token name to filter by.
-            from_date (str): Start date for filtering (YYYY-MM-DD).
-            to_date (str): End date for filtering (YYYY-MM-DD).
-
-        Returns:
-            dict: A dictionary with snapshot details, or None in case of failure.
-        """
-        miner_key = miner['miner_key']
-        module_ip = miner['miner_address']
-        module_port = int(miner['miner_ip_port'])
-        module_client = ModuleClient(module_ip, module_port, self.key)
-
-        try:
-            snapshot_result = await module_client.call(
-                "export_snapshot",
-                miner_key,
-                {
-                    "miner_key": miner_key,
-                    "token": token,
-                    "from_date": from_date,
-                    "to_date": to_date,
-                    "validator_key": self.key.ss58_address,
-                },
-                timeout=self.snapshot_timeout,
-            )
-            if not snapshot_result:
-                return None
-
-            return snapshot_result
-        except Exception as e:
-            logger.warning(f"Failed to fetch snapshot from miner", error=e, miner_key=miner_key)
-            return None
