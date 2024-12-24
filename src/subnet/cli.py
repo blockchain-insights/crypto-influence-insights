@@ -10,7 +10,6 @@ from loguru import logger
 from substrateinterface import Keypair
 
 from src.subnet.validator.database.models.miner_discovery import MinerDiscoveryManager
-from src.subnet.validator.database.models.miner_receipt import MinerReceiptManager
 from src.subnet.validator.database.models.tweet_cache import TweetCacheManager
 from src.subnet.validator.database.models.user_cache import UserCacheManager
 from src.subnet.validator.database.session_manager import DatabaseSessionManager, run_migrations
@@ -89,14 +88,11 @@ if __name__ == "__main__":
         c_client,
         weights_storage,
         miner_discovery_manager,
-        miner_receipt_manager,
         tweet_cache_manager,
         user_cache_manager,
         twitter_service,
         redis_client,
-        query_timeout=settings.QUERY_TIMEOUT,
-        challenge_timeout=settings.CHALLENGE_TIMEOUT,
-        snapshot_timeout=settings.SNAPSHOT_TIMEOUT
+        settings
     )
 
 
