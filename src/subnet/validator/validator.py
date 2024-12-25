@@ -2,7 +2,8 @@ import threading
 import time
 from datetime import datetime, timezone
 from random import random
-from typing import cast, Dict, Optional
+from typing import cast, Dict, Optional, List
+from urllib.parse import urlparse
 
 from aioredis import Redis
 from communex.client import CommuneClient  # type: ignore
@@ -10,7 +11,7 @@ from communex.misc import get_map_modules
 from communex.module.client import ModuleClient  # type: ignore
 from communex.module.module import Module  # type: ignore
 from communex.types import Ss58Address  # type: ignore
-from helpers.ipfs_utils import fetch_file_from_ipfs
+from src.subnet.validator.helpers.ipfs_utils import fetch_file_from_ipfs
 from loguru import logger
 from substrateinterface import Keypair  # type: ignore
 from ._config import ValidatorSettings
@@ -106,35 +107,31 @@ class Validator(Module):
             return None
 
     @staticmethod
-    def validate_json_dataset(dataset: Dict) -> bool:
+    def validate_json_dataset(dataset: List[Dict]) -> bool:
         """
         Validates the structure, completeness, and integrity of the dataset.
 
         Args:
-            dataset (Dict): The dataset to validate.
+            dataset (List[Dict]): The dataset to validate.
 
         Returns:
             bool: True if the dataset is valid, False otherwise.
         """
         # Required fields for the dataset
-        required_fields = {"token", "tweet", "user_account", "region"}
+        required_fields = {"token", "tweet", "user_account", "region", "edges"}
         required_tweet_fields = {"id", "url", "text", "likes", "images", "timestamp"}
         required_user_fields = {"username", "user_id", "is_verified", "follower_count", "account_age",
                                 "engagement_level", "total_tweets"}
         required_region_fields = {"name"}
+        required_edge_fields = {"type", "from", "to", "attributes"}
 
-        # Validate dataset structure
-        if not isinstance(dataset, dict):
-            print("Dataset is not a dictionary.")
-            return False
-
-        if "entries" not in dataset or not isinstance(dataset["entries"], list):
-            print("Dataset does not have a valid 'entries' list.")
+        if not isinstance(dataset, list):
+            print("Dataset is not a list.")
             return False
 
         token_found = False
 
-        for index, entry in enumerate(dataset["entries"]):
+        for index, entry in enumerate(dataset):
             if not isinstance(entry, dict):
                 print(f"Entry at index {index} is not a dictionary.")
                 return False
@@ -215,6 +212,26 @@ class Validator(Module):
             if missing_region_fields:
                 print(f"Region in entry at index {index} is missing fields: {missing_region_fields}")
                 return False
+
+            # Validate 'edges'
+            edges = entry["edges"]
+            if not isinstance(edges, list):
+                print(f"'edges' is not a list in entry at index {index}.")
+                return False
+
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    print(f"An edge in entry at index {index} is not a dictionary.")
+                    return False
+
+                missing_edge_fields = required_edge_fields - edge.keys()
+                if missing_edge_fields:
+                    print(f"An edge in entry at index {index} is missing fields: {missing_edge_fields}")
+                    return False
+
+                if not isinstance(edge["attributes"], dict):
+                    print(f"'attributes' in edge at index {index} is not a dictionary.")
+                    return False
 
         if not token_found:
             print("No valid 'token' field found in the dataset.")
@@ -382,17 +399,24 @@ class Validator(Module):
             raise ValueError(f"Failed to parse dataset content: {str(e)}")
 
     @staticmethod
-    async def fetch_dataset(ipfs_hash: str) -> dict:
+    async def fetch_dataset(ipfs_identifier: str) -> dict:
         """
         Retrieve a dataset file from IPFS and return its content.
 
         Args:
-            ipfs_hash (str): The IPFS hash of the dataset file.
+            ipfs_identifier (str): The IPFS hash or full URL.
 
         Returns:
             dict: Dataset content as a dictionary.
         """
         try:
+            # Extract hash if a full URL is passed
+            if ipfs_identifier.startswith("http"):
+                parsed_url = urlparse(ipfs_identifier)
+                ipfs_hash = parsed_url.path.split('/')[-1]  # Extract the last part of the path
+            else:
+                ipfs_hash = ipfs_identifier
+
             file_content = fetch_file_from_ipfs(ipfs_hash)
             dataset = Validator.parse_dataset(file_content)
             return dataset
@@ -424,10 +448,11 @@ class Validator(Module):
         valid_uids = set()
         for uid, miner_info in miners_module_info.items():
             connection, miner_metadata = miner_info
+            module_ip, module_port = connection
             miner_key = miner_metadata['key']
-
+            client = ModuleClient(module_ip, int(module_port), self.key)
             # Perform discovery and dataset validation
-            discovery = await self._get_discovery(self.client, miner_key)
+            discovery = await self._get_discovery(client, miner_key)
             if not discovery or not discovery.dataset_link:
                 logger.warning(f"No dataset link found for miner {miner_key}. Excluding from scoring.")
                 continue
@@ -442,6 +467,8 @@ class Validator(Module):
                 version=discovery.version,
                 ipfs_link=discovery.dataset_link
             )
+            # Update rank based on overall emissions or another external factor
+            await self.miner_discovery_manager.update_miner_rank(miner_key, miner_metadata['emission'])
 
             dataset = await self._fetch_and_validate_dataset(discovery.dataset_link)
             if not dataset:

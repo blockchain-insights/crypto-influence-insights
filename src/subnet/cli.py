@@ -73,7 +73,6 @@ if __name__ == "__main__":
     run_migrations()
 
     miner_discovery_manager = MinerDiscoveryManager(session_manager)
-    miner_receipt_manager = MinerReceiptManager(session_manager)
     tweet_cache_manager = TweetCacheManager(session_manager)
     user_cache_manager = UserCacheManager(session_manager)
     twitter_round_robbin_token_provider = RoundRobinBearerTokenProvider(settings)
