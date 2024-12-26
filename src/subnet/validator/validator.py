@@ -1,7 +1,11 @@
+import json
+import os
+
+from jsonschema import validate, ValidationError
 import threading
 import time
 from datetime import datetime, timezone
-from random import random
+from random import sample
 from typing import cast, Dict, Optional, List
 from urllib.parse import urlparse
 
@@ -25,9 +29,7 @@ from src.subnet.validator.database.models.user_cache import UserCacheManager
 from .twitter import TwitterService
 from .. import VERSION
 
-
-class Validator(Module):
-
+class Validator:
     def __init__(
             self,
             key: Keypair,
@@ -80,7 +82,8 @@ class Validator(Module):
             logger.info(f"Miner failed to get discovery", miner_key=miner_key, error=e)
             return None
 
-    async def _fetch_and_validate_dataset(self, dataset_link: str) -> Optional[Dict]:
+    @staticmethod
+    async def _fetch_and_validate_dataset(dataset_link: str) -> Optional[List[Dict]]:
         """
         Fetches the dataset from the provided IPFS link and validates its structure and integrity.
 
@@ -88,164 +91,114 @@ class Validator(Module):
             dataset_link (str): The IPFS link to the dataset.
 
         Returns:
-            Optional[Dict]: The validated dataset or None if invalid.
+            Optional[List[Dict]]: The validated dataset or None if invalid.
         """
         try:
+            # Dynamically determine the path to the schema file
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            schema_path = os.path.join(base_dir, "..", "protocol", "dataset_schema.json")
+
             logger.info(f"Fetching dataset from IPFS: {dataset_link}")
-            dataset = await self.fetch_dataset(dataset_link)
+            dataset = await Validator.fetch_dataset(dataset_link)
             if not dataset:
                 logger.error("Failed to fetch dataset.")
                 return None
 
-            if not self.validate_json_dataset(dataset):
+            if not Validator.validate_json_dataset(dataset, schema_path):
                 logger.error("Dataset validation failed.")
                 return None
 
+            logger.info("Dataset successfully fetched and validated.")
             return dataset
         except Exception as e:
             logger.error(f"Error fetching or validating dataset: {e}")
             return None
 
     @staticmethod
-    def validate_json_dataset(dataset: List[Dict]) -> bool:
+    def load_schema(file_path: str) -> dict:
         """
-        Validates the structure, completeness, and integrity of the dataset.
+        Load the JSON schema from a file.
+
+        Args:
+            file_path (str): Path to the schema file.
+
+        Returns:
+            dict: The loaded schema.
+        """
+        with open(file_path, "r") as file:
+            return json.load(file)
+
+    @staticmethod
+    def validate_json_dataset(dataset: List[Dict], schema_path: str) -> bool:
+        """
+        Validates the dataset using the JSON schema.
 
         Args:
             dataset (List[Dict]): The dataset to validate.
+            schema_path (str): Path to the JSON schema file.
 
         Returns:
             bool: True if the dataset is valid, False otherwise.
         """
-        # Required fields for the dataset
-        required_fields = {"token", "tweet", "user_account", "region", "edges"}
-        required_tweet_fields = {"id", "url", "text", "likes", "images", "timestamp"}
-        required_user_fields = {"username", "user_id", "is_verified", "follower_count", "account_age",
-                                "engagement_level", "total_tweets"}
-        required_region_fields = {"name"}
-        required_edge_fields = {"type", "from", "to", "attributes"}
-
-        if not isinstance(dataset, list):
-            print("Dataset is not a list.")
+        try:
+            schema = Validator.load_schema(schema_path)
+            validate(instance=dataset, schema=schema)
+            logger.info("Dataset is valid.")
+            return True
+        except ValidationError as e:
+            logger.error(f"Dataset validation error: {e.message}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error during validation: {e}")
             return False
 
-        token_found = False
+    @staticmethod
+    async def fetch_dataset(ipfs_identifier: str) -> List[Dict]:
+        """
+        Retrieve a dataset file from IPFS and return its content.
 
-        for index, entry in enumerate(dataset):
-            if not isinstance(entry, dict):
-                print(f"Entry at index {index} is not a dictionary.")
-                return False
+        Args:
+            ipfs_identifier (str): The IPFS hash or full URL.
 
-            # Check for missing required fields
-            missing_fields = required_fields - entry.keys()
-            if missing_fields:
-                print(f"Entry at index {index} is missing fields: {missing_fields}")
-                return False
+        Returns:
+            List[Dict]: Dataset content as a list of dictionaries.
+        """
+        try:
+            # Extract hash if a full URL is passed
+            if ipfs_identifier.startswith("http"):
+                parsed_url = urlparse(ipfs_identifier)
+                ipfs_hash = parsed_url.path.split('/')[-1]  # Extract the last part of the path
+            else:
+                ipfs_hash = ipfs_identifier
 
-            # Validate 'token'
-            if not isinstance(entry["token"], str) or not entry["token"].strip():
-                print(f"Invalid 'token' in entry at index {index}.")
-                return False
-            token_found = True
+            file_content = fetch_file_from_ipfs(ipfs_hash)
+            dataset = Validator.parse_dataset(file_content)
+            return dataset
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch and parse dataset: {str(e)}")
 
-            # Validate 'tweet' fields
-            tweet = entry["tweet"]
-            if not isinstance(tweet, dict):
-                print(f"'tweet' is not a dictionary in entry at index {index}.")
-                return False
+    @staticmethod
+    def parse_dataset(file_content: str) -> List[Dict]:
+        """
+        Parse the dataset content into a list of dictionaries.
 
-            missing_tweet_fields = required_tweet_fields - tweet.keys()
-            if missing_tweet_fields:
-                print(f"Tweet in entry at index {index} is missing fields: {missing_tweet_fields}")
-                return False
+        Args:
+            file_content (str): Content of the dataset file.
 
-            try:
-                datetime.fromisoformat(tweet["timestamp"])
-            except (ValueError, TypeError):
-                print(f"Invalid 'timestamp' in tweet at index {index}.")
-                return False
+        Returns:
+            List[Dict]: Parsed dataset.
+        """
+        try:
+            return json.loads(file_content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse dataset content: {str(e)}")
 
-            if not isinstance(tweet["likes"], int) or tweet["likes"] < 0:
-                print(f"Invalid 'likes' in tweet at index {index}.")
-                return False
-
-            if not isinstance(tweet["images"], list):
-                print(f"'images' is not a list in tweet at index {index}.")
-                return False
-
-            # Validate 'user_account' fields
-            user_account = entry["user_account"]
-            if not isinstance(user_account, dict):
-                print(f"'user_account' is not a dictionary in entry at index {index}.")
-                return False
-
-            missing_user_fields = required_user_fields - user_account.keys()
-            if missing_user_fields:
-                print(f"User account in entry at index {index} is missing fields: {missing_user_fields}")
-                return False
-
-            try:
-                datetime.fromisoformat(user_account["account_age"])
-            except (ValueError, TypeError):
-                print(f"Invalid 'account_age' in user account at index {index}.")
-                return False
-
-            if not isinstance(user_account["follower_count"], int) or user_account["follower_count"] < 0:
-                print(f"Invalid 'follower_count' in user account at index {index}.")
-                return False
-
-            if not isinstance(user_account["engagement_level"], int) or user_account["engagement_level"] < 0:
-                print(f"Invalid 'engagement_level' in user account at index {index}.")
-                return False
-
-            if not isinstance(user_account["total_tweets"], int) or user_account["total_tweets"] < 0:
-                print(f"Invalid 'total_tweets' in user account at index {index}.")
-                return False
-
-            # Validate 'region' fields
-            region = entry["region"]
-            if not isinstance(region, dict):
-                print(f"'region' is not a dictionary in entry at index {index}.")
-                return False
-
-            missing_region_fields = required_region_fields - region.keys()
-            if missing_region_fields:
-                print(f"Region in entry at index {index} is missing fields: {missing_region_fields}")
-                return False
-
-            # Validate 'edges'
-            edges = entry["edges"]
-            if not isinstance(edges, list):
-                print(f"'edges' is not a list in entry at index {index}.")
-                return False
-
-            for edge in edges:
-                if not isinstance(edge, dict):
-                    print(f"An edge in entry at index {index} is not a dictionary.")
-                    return False
-
-                missing_edge_fields = required_edge_fields - edge.keys()
-                if missing_edge_fields:
-                    print(f"An edge in entry at index {index} is missing fields: {missing_edge_fields}")
-                    return False
-
-                if not isinstance(edge["attributes"], dict):
-                    print(f"'attributes' in edge at index {index} is not a dictionary.")
-                    return False
-
-        if not token_found:
-            print("No valid 'token' field found in the dataset.")
-            return False
-
-        print("Dataset is valid.")
-        return True
-
-    async def score_dataset(self, dataset: Dict, sample_size: int = 3) -> Dict[str, float]:
+    async def score_dataset(self, dataset: List[Dict], sample_size: int = 3) -> Dict[str, float]:
         """
         Scores a dataset based on tweet and user account validation.
 
         Args:
-            dataset (Dict): The dataset to score.
+            dataset (List[Dict]): The dataset to score.
             sample_size (int): Number of random entries to validate per category.
 
         Returns:
@@ -253,11 +206,11 @@ class Validator(Module):
         """
         scores = {}
 
-        if "entries" not in dataset or not isinstance(dataset["entries"], list):
-            logger.error("Invalid dataset format: 'entries' missing or not a list.")
+        if not isinstance(dataset, list):
+            logger.error("Invalid dataset format: dataset must be a list.")
             return {"overall_score": 0.0}
 
-        total_entries = len(dataset["entries"])
+        total_entries = len(dataset)
         if total_entries == 0:
             logger.error("Dataset contains no entries.")
             return {"overall_score": 0.0}
@@ -265,7 +218,7 @@ class Validator(Module):
         tweet_scores = []
         user_scores = []
 
-        sampled_entries = random.sample(dataset["entries"], min(sample_size, total_entries))
+        sampled_entries = sample(dataset, min(sample_size, total_entries))
         for entry in sampled_entries:
             tweet_score = await self._validate_tweet(entry.get("tweet"))
             user_score = await self._validate_user(entry.get("user_account"))
@@ -381,54 +334,15 @@ class Validator(Module):
             logger.error(f"Error validating user: {e}")
             return None
 
-    @staticmethod
-    def parse_dataset(file_content: str) -> dict:
-        """
-        Parse the dataset content into a dictionary.
-
-        Args:
-            file_content (str): Content of the dataset file.
-
-        Returns:
-            dict: Parsed dataset.
-        """
-        import json
-        try:
-            return json.loads(file_content)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse dataset content: {str(e)}")
-
-    @staticmethod
-    async def fetch_dataset(ipfs_identifier: str) -> dict:
-        """
-        Retrieve a dataset file from IPFS and return its content.
-
-        Args:
-            ipfs_identifier (str): The IPFS hash or full URL.
-
-        Returns:
-            dict: Dataset content as a dictionary.
-        """
-        try:
-            # Extract hash if a full URL is passed
-            if ipfs_identifier.startswith("http"):
-                parsed_url = urlparse(ipfs_identifier)
-                ipfs_hash = parsed_url.path.split('/')[-1]  # Extract the last part of the path
-            else:
-                ipfs_hash = ipfs_identifier
-
-            file_content = fetch_file_from_ipfs(ipfs_hash)
-            dataset = Validator.parse_dataset(file_content)
-            return dataset
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch and parse dataset: {str(e)}")
-
     async def validate_step(self, netuid: int, settings: ValidatorSettings) -> None:
-        score_dict: dict[int, float] = {}
+        """
+        Perform a single validation step, processing miners and scoring their datasets.
+        """
+        score_dict: Dict[int, float] = {}
         miners_module_info = {}
 
         # Get modules and their addresses
-        modules = cast(dict[str, Dict], get_map_modules(self.client, netuid=netuid, include_balances=False))
+        modules = get_map_modules(self.client, netuid=netuid, include_balances=False)
         modules_addresses = self.get_addresses(self.client, netuid)
         ip_ports = get_ip_port(modules_addresses)
 
@@ -470,7 +384,7 @@ class Validator(Module):
             # Update rank based on overall emissions or another external factor
             await self.miner_discovery_manager.update_miner_rank(miner_key, miner_metadata['emission'])
 
-            dataset = await self._fetch_and_validate_dataset(discovery.dataset_link)
+            dataset = await Validator._fetch_and_validate_dataset(discovery.dataset_link)
             if not dataset:
                 logger.warning(f"Invalid dataset for miner {miner_key}. Excluding from scoring.")
                 continue
@@ -495,13 +409,13 @@ class Validator(Module):
         else:
             logger.info("No valid miners found in this validation step.")
 
-    def set_weights(self, settings: ValidatorSettings, score_dict: dict[int, float], netuid: int, client: CommuneClient, key: Keypair) -> None:
+    def set_weights(self, settings: ValidatorSettings, score_dict: Dict[int, float], netuid: int, client: CommuneClient, key: Keypair) -> None:
         """
         Calculate and set weights for miners based on their scores.
         """
         score_dict = cut_to_max_allowed_weights(score_dict, settings.MAX_ALLOWED_WEIGHTS)
         self.weights_storage.setup()
-        weighted_scores: dict[int, int] = self.weights_storage.read()
+        weighted_scores: Dict[int, int] = self.weights_storage.read()
 
         logger.debug(f"Setting weights for scores", score_dict=score_dict)
         score_sum = sum(score_dict.values())
