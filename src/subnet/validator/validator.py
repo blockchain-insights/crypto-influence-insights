@@ -263,6 +263,13 @@ class Validator:
                 logger.warning("Missing or invalid tweet ID.")
                 return None
 
+            # Ensure tweet_date is parsed into a datetime object
+            if isinstance(tweet_date, str):
+                tweet_date = datetime.fromisoformat(tweet_date.replace("Z", "+00:00"))
+
+            # Make tweet_date offset-naive
+            tweet_date = tweet_date.replace(tzinfo=None)
+
             cached_tweet = await self.tweet_cache_manager.get_tweet_cache(tweet_id)
             if cached_tweet:
                 logger.info(f"Tweet data retrieved from cache for tweet_id {tweet_id}")
@@ -274,18 +281,24 @@ class Validator:
                     return 0.0
 
                 cached_date = (
-                    datetime.fromisoformat(fetched_tweet.created_at.replace("Z", "+00:00")).astimezone(
-                        timezone.utc).replace(tzinfo=None)
+                    datetime.fromisoformat(fetched_tweet.created_at.replace("Z", "+00:00"))
                     if isinstance(fetched_tweet.created_at, str)
-                    else fetched_tweet.created_at.astimezone(timezone.utc).replace(tzinfo=None)
+                    else fetched_tweet.created_at
                 )
-                await self.tweet_cache_manager.store_tweet_cache(tweet_id=tweet_id, tweet_date=cached_date.isoformat())
+                # Make cached_date offset-naive
+                cached_date = cached_date.replace(tzinfo=None)
 
-            actual_date = datetime.fromisoformat(tweet_date.replace("Z", "+00:00")).astimezone(timezone.utc).replace(
-                tzinfo=None)
-            if actual_date != cached_date:
+                # Store the tweet in the cache with proper formatting
+                await self.tweet_cache_manager.store_tweet_cache(
+                    tweet_id=tweet_id,
+                    tweet_date=cached_date  # Store offset-naive datetime
+                )
+
+            # Ensure both dates are offset-naive
+            if cached_date != tweet_date:
                 logger.warning(
-                    f"Tweet date mismatch for tweet_id {tweet_id}: expected {cached_date}, got {actual_date}.")
+                    f"Tweet date mismatch for tweet_id {tweet_id}: expected {cached_date}, got {tweet_date}."
+                )
                 return 0.5
 
             return 1.0

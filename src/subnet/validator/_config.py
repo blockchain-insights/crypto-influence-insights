@@ -55,8 +55,8 @@ class ValidatorSettings(BaseSettings):
     API_RATE_LIMIT: int
     REDIS_URL: str
 
-    QUERY_TIMEOUT: int   # cross check query timeout
-    CHALLENGE_TIMEOUT: int  # challenge and llm challenge time
+    QUERY_TIMEOUT: int = 10   # cross check query timeout
+    CHALLENGE_TIMEOUT: int    # challenge and llm challenge time
     SNAPSHOT_TIMEOUT: int
 
     RECEIPT_SYNC_FREQUENCY: int = 3600
