@@ -16,6 +16,7 @@ from src.subnet.validator.database.session_manager import DatabaseSessionManager
 from src.subnet.validator.weights_storage import WeightsStorage
 from src.subnet.validator._config import load_environment, SettingsManager
 from src.subnet.validator.validator import Validator
+from src.subnet.validator.helpers.validator_graph_handler import ValidatorGraphHandler
 from validator.twitter import TwitterClient, TwitterService, RoundRobinBearerTokenProvider
 
 
@@ -78,6 +79,7 @@ if __name__ == "__main__":
     twitter_round_robbin_token_provider = RoundRobinBearerTokenProvider(settings)
     twitter_client = TwitterClient(twitter_round_robbin_token_provider)
     twitter_service = TwitterService(twitter_client)
+    graph_handler = ValidatorGraphHandler(settings)
 
     redis_client = Redis.from_url(settings.REDIS_URL)
 
@@ -90,6 +92,7 @@ if __name__ == "__main__":
         tweet_cache_manager,
         user_cache_manager,
         twitter_service,
+        graph_handler,
         redis_client,
         settings
     )

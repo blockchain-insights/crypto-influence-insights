@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 
 from jsonschema import validate, ValidationError
 import threading
@@ -21,13 +22,17 @@ from substrateinterface import Keypair  # type: ignore
 from ._config import ValidatorSettings
 
 from src.subnet.validator.helpers.helpers import raise_exception_if_not_registered, get_ip_port, cut_to_max_allowed_weights
+from .helpers.graph_search import GraphSearch
+from .helpers.validator_graph_handler import ValidatorGraphHandler
 from .weights_storage import WeightsStorage
 from src.subnet.validator.database.models.miner_discovery import MinerDiscoveryManager
 from src.subnet.protocol import Discovery
 from src.subnet.validator.database.models.tweet_cache import TweetCacheManager
 from src.subnet.validator.database.models.user_cache import UserCacheManager
+from src.subnet.validator.helpers.validator_graph_handler import ValidatorGraphHandler
 from .twitter import TwitterService
 from .. import VERSION
+from .encryption import generate_hash
 
 class Validator:
     def __init__(
@@ -40,6 +45,7 @@ class Validator:
             tweet_cache_manager: TweetCacheManager,
             user_cache_manager: UserCacheManager,
             twitter_service: TwitterService,
+            graph_handler: ValidatorGraphHandler,
             redis_client: Redis,
             settings: ValidatorSettings
     ) -> None:
@@ -56,7 +62,9 @@ class Validator:
         self.user_cache_manager = user_cache_manager
         self.twitter_service = twitter_service
         self.terminate_event = threading.Event()
+        self.graph_handler = graph_handler
         self.redis_client = redis_client
+        self.settings = settings
         self.enable_gateway = settings.ENABLE_GATEWAY
 
     @staticmethod
@@ -83,12 +91,15 @@ class Validator:
             return None
 
     @staticmethod
-    async def _fetch_and_validate_dataset(dataset_link: str) -> Optional[List[Dict]]:
+    async def _fetch_and_validate_dataset(dataset_link: str, graph_handler: ValidatorGraphHandler,
+                                          scrape_token: str) -> Optional[List[Dict]]:
         """
-        Fetches the dataset from the provided IPFS link and validates its structure and integrity.
+        Fetches the dataset from IPFS and validates it. Merges valid data into the graph.
 
         Args:
             dataset_link (str): The IPFS link to the dataset.
+            graph_handler (ValidatorGraphHandler): Instance for handling graph operations.
+            scrape_token (str): The scrape session token.
 
         Returns:
             Optional[List[Dict]]: The validated dataset or None if invalid.
@@ -98,7 +109,6 @@ class Validator:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             schema_path = os.path.join(base_dir, "..", "protocol", "dataset_schema.json")
 
-            logger.info(f"Fetching dataset from IPFS: {dataset_link}")
             dataset = await Validator.fetch_dataset(dataset_link)
             if not dataset:
                 logger.error("Failed to fetch dataset.")
@@ -108,7 +118,10 @@ class Validator:
                 logger.error("Dataset validation failed.")
                 return None
 
-            logger.info("Dataset successfully fetched and validated.")
+            # Merge valid data into Memgraph
+            graph_handler.merge_data(dataset, scrape_token)
+
+            logger.info("Dataset successfully fetched, validated, and merged into the graph.")
             return dataset
         except Exception as e:
             logger.error(f"Error fetching or validating dataset: {e}")
@@ -397,7 +410,7 @@ class Validator:
             # Update rank based on overall emissions or another external factor
             await self.miner_discovery_manager.update_miner_rank(miner_key, miner_metadata['emission'])
 
-            dataset = await Validator._fetch_and_validate_dataset(discovery.dataset_link)
+            dataset = await Validator._fetch_and_validate_dataset(discovery.dataset_link, self.graph_handler, discovery.token)
             if not dataset:
                 logger.warning(f"Invalid dataset for miner {miner_key}. Excluding from scoring.")
                 continue
@@ -460,3 +473,55 @@ class Validator:
                 sleep_time = settings.ITERATION_INTERVAL - elapsed
                 logger.info(f"Sleeping for {sleep_time}")
                 self.terminate_event.wait(sleep_time)
+
+    async def query_memgraph(self, token: str, query: str) -> dict:
+        """
+        Queries the Memgraph database using GraphSearch and returns the results.
+
+        Args:
+            token (str): The token associated with the query.
+            query (str): The Cypher query to be executed.
+
+        Returns:
+            dict: A dictionary containing request metadata and query results.
+        """
+        request_id = str(uuid.uuid4())
+        timestamp = datetime.utcnow()
+        query_hash = generate_hash(query)
+
+        graph_search = GraphSearch(self.settings)
+
+        try:
+            # Execute the query using GraphSearch
+            start_time = time.time()
+            results = graph_search.execute_query(query)
+            response_time = round(time.time() - start_time, 3)
+
+            # Generate a response dictionary
+            response = {
+                "request_id": request_id,
+                "timestamp": timestamp,
+                "token": token,
+                "query": query,
+                "query_hash": query_hash,
+                "response_time": response_time,
+                "results": results,
+            }
+            return response
+        except Exception as e:
+            # Handle query execution errors
+            logger.error(f"Error querying Memgraph: {e}")
+            return {
+                "request_id": request_id,
+                "timestamp": timestamp,
+                "token": token,
+                "query": query,
+                "query_hash": query_hash,
+                "response_time": None,
+                "results": None,
+                "error": str(e),
+            }
+        finally:
+            # Ensure the GraphSearch connection is closed
+            graph_search.close()
+

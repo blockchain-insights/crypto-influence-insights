@@ -14,7 +14,7 @@ class TwitterFraudDetectionApi(QueryApi):
 
     async def _execute_query(self, token: str, query: str) -> dict:
         try:
-            data = await self.validator.query_miner(token, query=query, miner_key=None)
+            data = await self.validator.query_memgraph(token, query=query)
             return data
         except Exception as e:
             raise Exception(f"Error executing query: {str(e)}")
@@ -229,10 +229,9 @@ class TwitterFraudDetectionApi(QueryApi):
         """
         try:
             # Execute the Cypher query and fetch the result
-            return await self.validator.query_miner(
+            return await self.validator.query_memgraph(
                 token=token,
-                query=query,
-                miner_key=None
+                query=query
             )
         except Exception as e:
             raise Exception(f"Error fetching account analysis: {str(e)}")

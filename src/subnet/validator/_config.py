@@ -50,6 +50,10 @@ class ValidatorSettings(BaseSettings):
     PORT: int = 9900
     WORKERS: int = 4
 
+    GRAPH_DB_USER: str
+    GRAPH_DB_PASSWORD: str
+    GRAPH_DB_URL: str
+
     WEIGHTS_FILE_NAME: str = 'weights.pkl'
     DATABASE_URL: str
     API_RATE_LIMIT: int
