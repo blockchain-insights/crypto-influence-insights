@@ -65,7 +65,6 @@ class Validator:
         self.graph_handler = graph_handler
         self.redis_client = redis_client
         self.settings = settings
-        self.enable_gateway = settings.ENABLE_GATEWAY
 
     @staticmethod
     def get_addresses(client: CommuneClient, netuid: int) -> dict[int, str]:
@@ -92,7 +91,7 @@ class Validator:
 
     @staticmethod
     async def _fetch_and_validate_dataset(dataset_link: str, graph_handler: ValidatorGraphHandler,
-                                          scrape_token: str) -> Optional[List[Dict]]:
+                                          scrape_token: str, enable_gateway: bool) -> Optional[List[Dict]]:
         """
         Fetches the dataset from IPFS and validates it. Merges valid data into the graph.
 
@@ -119,9 +118,14 @@ class Validator:
                 return None
 
             # Merge valid data into Memgraph
-            graph_handler.merge_data(dataset, scrape_token)
+            if not enable_gateway:
+                logger.info("Gateway is disabled. Memgraph query functionality is not available.")
+                logger.info("Dataset successfully fetched and validated.")
+            else:
+                graph_handler.merge_data(dataset, scrape_token)
+                logger.info("Dataset successfully fetched, validated, and merged into the graph.")
 
-            logger.info("Dataset successfully fetched, validated, and merged into the graph.")
+
             return dataset
         except Exception as e:
             logger.error(f"Error fetching or validating dataset: {e}")
@@ -410,7 +414,7 @@ class Validator:
             # Update rank based on overall emissions or another external factor
             await self.miner_discovery_manager.update_miner_rank(miner_key, miner_metadata['emission'])
 
-            dataset = await Validator._fetch_and_validate_dataset(discovery.dataset_link, self.graph_handler, discovery.token)
+            dataset = await Validator._fetch_and_validate_dataset(discovery.dataset_link, self.graph_handler, discovery.token, self.settings.ENABLE_GATEWAY)
             if not dataset:
                 logger.warning(f"Invalid dataset for miner {miner_key}. Excluding from scoring.")
                 continue
@@ -489,6 +493,21 @@ class Validator:
         timestamp = datetime.utcnow()
         query_hash = generate_hash(query)
 
+        # Check if gateway is enabled
+        if not self.settings.ENABLE_GATEWAY:
+            error_message = "Gateway is disabled. Memgraph query functionality is not available."
+            logger.error(error_message)
+            return {
+                "request_id": request_id,
+                "timestamp": timestamp,
+                "token": token,
+                "query": query,
+                "query_hash": query_hash,
+                "response_time": None,
+                "results": None,
+                "error": error_message,
+            }
+
         graph_search = GraphSearch(self.settings)
 
         try:
@@ -524,4 +543,5 @@ class Validator:
         finally:
             # Ensure the GraphSearch connection is closed
             graph_search.close()
+
 

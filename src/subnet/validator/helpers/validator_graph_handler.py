@@ -45,25 +45,60 @@ class ValidatorGraphHandler:
                         token_name=token
                     )
 
-                    # Upsert Tweet node
+                    # Upsert Tweet node with all fields
                     session.run(
                         """
                         MERGE (tw:Tweet {id: $tweet_id})
-                        ON CREATE SET tw.text = $text, tw.timestamp = $timestamp
-                        ON MATCH SET tw.text = $text, tw.timestamp = $timestamp, tw.updated_at = timestamp()
+                        ON CREATE SET 
+                            tw.url = $url,
+                            tw.text = $text,
+                            tw.likes = $likes,
+                            tw.retweets = $retweets,
+                            tw.timestamp = $timestamp
+                        ON MATCH SET 
+                            tw.url = $url,
+                            tw.text = $text,
+                            tw.likes = $likes,
+                            tw.retweets = $retweets,
+                            tw.timestamp = $timestamp,
+                            tw.updated_at = timestamp()
                         """,
-                        tweet_id=tweet['id'], text=tweet['text'], timestamp=tweet['timestamp']
+                        tweet_id=tweet['id'],
+                        url=tweet.get('url'),
+                        text=tweet.get('text'),
+                        likes=tweet.get('likes', 0),
+                        retweets=tweet.get('retweets', 0),
+                        timestamp=tweet.get('timestamp')
                     )
 
-                    # Upsert UserAccount node
+                    # Upsert UserAccount node with all fields
                     session.run(
                         """
                         MERGE (ua:UserAccount {user_id: $user_id})
-                        ON CREATE SET ua.username = $username, ua.follower_count = $follower_count
-                        ON MATCH SET ua.username = $username, ua.follower_count = $follower_count, ua.updated_at = timestamp()
+                        ON CREATE SET 
+                            ua.username = $username,
+                            ua.is_verified = $is_verified,
+                            ua.follower_count = $follower_count,
+                            ua.account_age = $account_age,
+                            ua.engagement_level = $engagement_level,
+                            ua.total_tweets = $total_tweets,
+                            ua.created_at = timestamp()
+                        ON MATCH SET 
+                            ua.username = $username,
+                            ua.is_verified = $is_verified,
+                            ua.follower_count = $follower_count,
+                            ua.account_age = $account_age,
+                            ua.engagement_level = $engagement_level,
+                            ua.total_tweets = $total_tweets,
+                            ua.updated_at = timestamp()
                         """,
-                        user_id=user_account['user_id'], username=user_account['username'],
-                        follower_count=user_account['follower_count']
+                        user_id=user_account['user_id'],
+                        username=user_account.get('username'),
+                        is_verified=user_account.get('is_verified', False),
+                        follower_count=user_account.get('follower_count', 0),
+                        account_age=user_account.get('account_age', 0),
+                        engagement_level=user_account.get('engagement_level', 0.0),
+                        total_tweets=user_account.get('total_tweets', 0)
                     )
 
                     # Upsert Region node
@@ -77,29 +112,59 @@ class ValidatorGraphHandler:
                             region_name=region['name']
                         )
 
-                    # Upsert relationships
+                    # Upsert relationships with unique variables
                     for edge in edges:
                         if edge['type'] == 'MENTIONS':
                             session.run(
                                 """
                                 MATCH (ua:UserAccount {user_id: $user_id}), (t:Token {name: $token_name})
-                                MERGE (ua)-[r:MENTIONS]->(t)
-                                ON CREATE SET r.timestamp = $timestamp
-                                ON MATCH SET r.timestamp = $timestamp
+                                MERGE (ua)-[mentions_rel:MENTIONS]->(t)
+                                ON CREATE SET 
+                                    mentions_rel.timestamp = $timestamp, 
+                                    mentions_rel.hashtag_count = $hashtag_count
+                                ON MATCH SET 
+                                    mentions_rel.timestamp = $timestamp, 
+                                    mentions_rel.hashtag_count = $hashtag_count
                                 """,
-                                user_id=user_account['user_id'], token_name=token,
-                                timestamp=edge['attributes']['timestamp']
+                                user_id=user_account['user_id'],
+                                token_name=token,
+                                timestamp=edge['attributes']['timestamp'],
+                                hashtag_count=edge['attributes'].get('hashtag_count', 0)
                             )
                         elif edge['type'] == 'POSTED':
                             session.run(
                                 """
                                 MATCH (ua:UserAccount {user_id: $user_id}), (tw:Tweet {id: $tweet_id})
-                                MERGE (ua)-[r:POSTED]->(tw)
-                                ON CREATE SET r.timestamp = $timestamp
-                                ON MATCH SET r.timestamp = $timestamp
+                                MERGE (ua)-[posted_rel:POSTED]->(tw)
+                                ON CREATE SET 
+                                    posted_rel.timestamp = $timestamp, 
+                                    posted_rel.likes = $likes
+                                ON MATCH SET 
+                                    posted_rel.timestamp = $timestamp, 
+                                    posted_rel.likes = $likes
                                 """,
-                                user_id=user_account['user_id'], tweet_id=tweet['id'],
-                                timestamp=edge['attributes']['timestamp']
+                                user_id=user_account['user_id'],
+                                tweet_id=tweet['id'],
+                                timestamp=edge['attributes']['timestamp'],
+                                likes=edge['attributes'].get('likes', 0)
+                            )
+                        elif edge['type'] == 'LOCATED_IN' and region.get('name') != "Unknown":
+                            session.run(
+                                """
+                                MATCH (ua:UserAccount {user_id: $user_id}), (r:Region {name: $region_name})
+                                MERGE (ua)-[located_in_rel:LOCATED_IN]->(r)
+                                """,
+                                user_id=user_account['user_id'],
+                                region_name=region['name']
+                            )
+                        elif edge['type'] == 'MENTIONED_IN':
+                            session.run(
+                                """
+                                MATCH (t:Token {name: $token_name}), (tw:Tweet {id: $tweet_id})
+                                MERGE (t)-[mentioned_in_rel:MENTIONED_IN]->(tw)
+                                """,
+                                token_name=token,
+                                tweet_id=tweet['id']
                             )
 
                 logger.info(f"Successfully merged {len(dataset)} entries into the graph database.")
