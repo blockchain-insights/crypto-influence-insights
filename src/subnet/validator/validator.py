@@ -212,18 +212,24 @@ class Validator:
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse dataset content: {str(e)}")
 
-    async def score_dataset(self, dataset: List[Dict], sample_size: int = 3) -> Dict[str, float]:
+    async def score_dataset(self, dataset: List[Dict], miner_key: str, sample_size: int = 3) -> Dict[str, float]:
         """
-        Scores a dataset based on validation and data freshness.
+        Scores a dataset based on validation and data freshness. Blacklists miner if invalid IDs are detected.
 
         Args:
             dataset (List[Dict]): The dataset to score.
+            miner_key (str): The unique identifier of the miner.
             sample_size (int): Number of random entries to validate per category.
 
         Returns:
             Dict[str, float]: A dictionary containing scoring details.
         """
         scores = {}
+
+        # Check if the miner is blacklisted
+        if await self.miner_discovery_manager.is_miner_blacklisted(miner_key):
+            logger.warning(f"Miner {miner_key} is blacklisted. Skipping scoring.")
+            return {"overall_score": 0.0}
 
         if not isinstance(dataset, list):
             logger.error("Invalid dataset format: dataset must be a list.")
@@ -257,7 +263,8 @@ class Validator:
                 tweet_scores.append(tweet_score)
                 valid_tweets += 1
             else:
-                logger.error("Invalid tweet detected. Setting overall_score to 0.")
+                logger.error(f"Invalid tweet detected for miner {miner_key}. Blacklisting miner.")
+                await self.miner_discovery_manager.set_miner_blacklisted(miner_key, True)
                 return {"overall_score": 0.0}
             total_tweets += 1
 
@@ -267,7 +274,8 @@ class Validator:
                 user_scores.append(user_score)
                 valid_users += 1
             else:
-                logger.error("Invalid user account detected. Setting overall_score to 0.")
+                logger.error(f"Invalid user account detected for miner {miner_key}. Blacklisting miner.")
+                await self.miner_discovery_manager.set_miner_blacklisted(miner_key, True)
                 return {"overall_score": 0.0}
             total_users += 1
 
@@ -449,7 +457,6 @@ class Validator:
         accuracy = validated_entries / total_entries
         return 1 - math.exp(-accuracy * 5)  # Exponential growth with diminishing returns
 
-
     async def validate_step(self, netuid: int, settings: ValidatorSettings) -> None:
         """
         Perform a single validation step, processing miners and scoring their datasets.
@@ -480,6 +487,12 @@ class Validator:
             connection, miner_metadata = miner_info
             module_ip, module_port = connection
             miner_key = miner_metadata['key']
+
+            # Skip blacklisted miners
+            if await self.miner_discovery_manager.is_miner_blacklisted(miner_key):
+                logger.warning(f"Skipping blacklisted miner: {miner_key}")
+                continue
+
             client = ModuleClient(module_ip, int(module_port), self.key)
             # Perform discovery and dataset validation
             discovery = await self._get_discovery(client, miner_key)
@@ -497,18 +510,17 @@ class Validator:
                 version=discovery.version,
                 ipfs_link=discovery.dataset_link
             )
-            # Update rank based on overall emissions or another external factor
-            await self.miner_discovery_manager.update_miner_rank(miner_key, miner_metadata['emission'])
 
-            dataset = await Validator._fetch_and_validate_dataset(discovery.dataset_link, self.graph_handler, discovery.token, self.settings.ENABLE_GATEWAY)
+            # Score dataset
+            dataset = await Validator._fetch_and_validate_dataset(
+                discovery.dataset_link, self.graph_handler, discovery.token, self.settings.ENABLE_GATEWAY
+            )
             if not dataset:
                 logger.warning(f"Invalid dataset for miner {miner_key}. Excluding from scoring.")
                 continue
 
-            # Score dataset
-            scores = await self.score_dataset(dataset)
-            total_score = sum(scores.values()) / len(scores)
-            score_dict[uid] = total_score
+            scores = await self.score_dataset(dataset, miner_key)
+            score_dict[uid] = scores.get("overall_score", 0.0)
             valid_uids.add(uid)
 
         # Log excluded miners

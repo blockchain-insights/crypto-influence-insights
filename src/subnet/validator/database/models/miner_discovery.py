@@ -26,7 +26,8 @@ class MinerDiscovery(OrmBase):
     token = Column(String, nullable=False)
     rank = Column(Float, nullable=False, default=0.0)
     version = Column(Float, nullable=False, default=1.0)
-    ipfs_link = Column(String, nullable=False)  # New field
+    ipfs_link = Column(String, nullable=False)
+    blacklisted = Column(Integer, nullable=False, default=0)  # 0 = not blacklisted, 1 = blacklisted
 
 
 class MinerDiscoveryManager:
@@ -76,6 +77,7 @@ class MinerDiscoveryManager:
                     MinerDiscovery.token,
                     func.count(MinerDiscovery.id).label('count')
                 )
+                .where(MinerDiscovery.blacklisted == 0)
                 .group_by(MinerDiscovery.token)
                 .order_by(func.count(MinerDiscovery.id).desc())
             )
@@ -85,15 +87,15 @@ class MinerDiscoveryManager:
             return [{'token': row.token, 'count': row.count} for row in rows]
 
     async def get_miners_by_token(self, token: Optional[str]):
-        if not token:
-            async with self.session_manager.session() as session:
+        async with self.session_manager.session() as session:
+            if not token:
                 result = await session.execute(
                     select(MinerDiscovery)
+                    .where(MinerDiscovery.blacklisted == 0)
                     .order_by(MinerDiscovery.timestamp, MinerDiscovery.rank)
                 )
                 return [to_dict(result) for result in result.scalars().all()]
-        else:
-            async with self.session_manager.session() as session:
+            else:
                 result = await session.execute(
                     select(MinerDiscovery)
                     .where(MinerDiscovery.token == token)
@@ -134,6 +136,8 @@ class MinerDiscoveryManager:
                     md.ipfs_link
                 FROM 
                     miner_discoveries AS md
+                WHERE
+                    md.blacklisted = 0
                 ORDER BY 
                     md.timestamp DESC, 
                     md.rank DESC;
@@ -172,3 +176,35 @@ class MinerDiscoveryManager:
                 ]
             else:
                 return {"token": token, "data": miners}
+
+    async def set_miner_blacklisted(self, miner_key: str, blacklisted: bool):
+        """
+        Set the blacklisted flag for a miner.
+
+        Args:
+            miner_key (str): The key of the miner.
+            blacklisted (bool): True to blacklist the miner, False to unblacklist.
+        """
+        async with self.session_manager.session() as session:
+            async with session.begin():
+                stmt = update(MinerDiscovery).where(
+                    MinerDiscovery.miner_key == miner_key
+                ).values(blacklisted=1 if blacklisted else 0)
+                await session.execute(stmt)
+
+    async def is_miner_blacklisted(self, miner_key: str) -> bool:
+        """
+        Check if a miner is blacklisted.
+
+        Args:
+            miner_key (str): The key of the miner.
+
+        Returns:
+            bool: True if the miner is blacklisted, False otherwise.
+        """
+        async with self.session_manager.session() as session:
+            result = await session.execute(
+                select(MinerDiscovery.blacklisted).where(MinerDiscovery.miner_key == miner_key)
+            )
+            blacklisted = result.scalar()
+            return blacklisted == 1
