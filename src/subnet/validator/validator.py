@@ -3,9 +3,11 @@ import os
 import uuid
 
 from jsonschema import validate, ValidationError
+import math
 import threading
 import time
 from datetime import datetime, timezone
+from dateutil import parser
 from random import sample
 from typing import cast, Dict, Optional, List
 from urllib.parse import urlparse
@@ -212,14 +214,14 @@ class Validator:
 
     async def score_dataset(self, dataset: List[Dict], sample_size: int = 3) -> Dict[str, float]:
         """
-        Scores a dataset based on tweet and user account validation.
+        Scores a dataset based on validation and data freshness.
 
         Args:
             dataset (List[Dict]): The dataset to score.
             sample_size (int): Number of random entries to validate per category.
 
         Returns:
-            Dict[str, float]: A dictionary with scoring details.
+            Dict[str, float]: A dictionary containing scoring details.
         """
         scores = {}
 
@@ -232,31 +234,87 @@ class Validator:
             logger.error("Dataset contains no entries.")
             return {"overall_score": 0.0}
 
+        # Prioritize newer records in sampling by sorting
+        sorted_dataset = sorted(dataset, key=lambda x: datetime.fromisoformat(x['tweet']['timestamp']), reverse=True)
+        sampled_entries = sorted_dataset[:min(sample_size, total_entries)]
+
+        # Validation results
+        valid_tweets = 0
+        valid_users = 0
+        total_tweets = 0
+        total_users = 0
+
         tweet_scores = []
         user_scores = []
 
-        sampled_entries = sample(dataset, min(sample_size, total_entries))
         for entry in sampled_entries:
-            tweet_score = await self._validate_tweet(entry.get("tweet"))
-            user_score = await self._validate_user(entry.get("user_account"))
+            tweet = entry.get("tweet")
+            user_account = entry.get("user_account")
 
+            # Validate tweet
+            tweet_score = await self._validate_tweet(tweet)
             if tweet_score is not None:
                 tweet_scores.append(tweet_score)
+                valid_tweets += 1
+            else:
+                logger.error("Invalid tweet detected. Setting overall_score to 0.")
+                return {"overall_score": 0.0}
+            total_tweets += 1
+
+            # Validate user account
+            user_score = await self._validate_user(user_account)
             if user_score is not None:
                 user_scores.append(user_score)
+                valid_users += 1
+            else:
+                logger.error("Invalid user account detected. Setting overall_score to 0.")
+                return {"overall_score": 0.0}
+            total_users += 1
 
+        # Calculate average scores
         avg_tweet_score = sum(tweet_scores) / len(tweet_scores) if tweet_scores else 0.0
         avg_user_score = sum(user_scores) / len(user_scores) if user_scores else 0.0
 
-        overall_score = (avg_tweet_score + avg_user_score) / 2
+        # Smooth scoring
+        tweet_contribution = self._smooth_score(valid_tweets, total_tweets)
+        user_contribution = self._smooth_score(valid_users, total_users)
+
+        # Final score (weighted combination)
+        overall_score = (0.7 * tweet_contribution) + (0.3 * user_contribution)
         scores.update({
-            "tweet_score": avg_tweet_score,
-            "user_score": avg_user_score,
+            "tweet_score": tweet_contribution,
+            "user_score": user_contribution,
             "overall_score": overall_score
         })
 
         logger.info(f"Dataset scored: {scores}")
         return scores
+
+    def _parse_and_normalize_date(self, date_value: str) -> datetime:
+        """
+        Parses a date string or datetime object and normalizes it to UTC.
+
+        Args:
+            date_value (str | datetime): The date value to parse.
+
+        Returns:
+            datetime: A timezone-aware UTC datetime object.
+        """
+        if isinstance(date_value, str):
+            try:
+                parsed_date = parser.isoparse(date_value)  # Parse ISO 8601
+                if parsed_date.tzinfo is None:
+                    parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+                return parsed_date.astimezone(timezone.utc)
+            except ValueError:
+                raise ValueError(f"Invalid date string: {date_value}")
+        elif isinstance(date_value, datetime):
+            # Normalize to UTC
+            if date_value.tzinfo is None:
+                return date_value.replace(tzinfo=timezone.utc)
+            return date_value.astimezone(timezone.utc)
+        else:
+            raise TypeError(f"Unsupported date format: {type(date_value)}")
 
     async def _validate_tweet(self, tweet: Dict) -> Optional[float]:
         """
@@ -280,45 +338,51 @@ class Validator:
                 logger.warning("Missing or invalid tweet ID.")
                 return None
 
-            # Ensure tweet_date is parsed into a datetime object
+            # Parse tweet_date safely and ensure it's a datetime object
             if isinstance(tweet_date, str):
-                tweet_date = datetime.fromisoformat(tweet_date.replace("Z", "+00:00"))
+                try:
+                    tweet_date = parser.isoparse(tweet_date)
+                except ValueError as e:
+                    logger.warning(f"Failed to parse tweet_date '{tweet_date}': {e}")
+                    return None
+            elif not isinstance(tweet_date, datetime):
+                logger.warning(f"Invalid tweet_date type: {type(tweet_date)}")
+                return None
 
-            # Make tweet_date offset-naive
-            tweet_date = tweet_date.replace(tzinfo=None)
+            # Ensure tweet_date is naive
+            if tweet_date.tzinfo is not None:
+                tweet_date = tweet_date.astimezone(timezone.utc).replace(tzinfo=None)
 
+            # Check freshness (e.g., within the last 7 days)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            days_old = (now - tweet_date).days
+            freshness_factor = math.exp(-days_old / 7)  # Exponential decay for older tweets
+
+            # Retrieve cached data
             cached_tweet = await self.tweet_cache_manager.get_tweet_cache(tweet_id)
             if cached_tweet:
                 logger.info(f"Tweet data retrieved from cache for tweet_id {tweet_id}")
-                cached_date = datetime.fromisoformat(cached_tweet["tweet_date"])
-            else:
-                fetched_tweet = self.twitter_service.get_tweet_details(tweet_id)
-                if not fetched_tweet:
-                    logger.warning(f"Tweet not found for tweet_id {tweet_id}.")
-                    return 0.0
+                return 1.0 * freshness_factor
 
-                cached_date = (
-                    datetime.fromisoformat(fetched_tweet.created_at.replace("Z", "+00:00"))
-                    if isinstance(fetched_tweet.created_at, str)
-                    else fetched_tweet.created_at
-                )
-                # Make cached_date offset-naive
-                cached_date = cached_date.replace(tzinfo=None)
+            # Fetch live data if not cached
+            fetched_tweet = self.twitter_service.get_tweet_details(tweet_id)
+            if not fetched_tweet:
+                logger.warning(f"Tweet not found for tweet_id {tweet_id}.")
+                return None
 
-                # Store the tweet in the cache with proper formatting
-                await self.tweet_cache_manager.store_tweet_cache(
-                    tweet_id=tweet_id,
-                    tweet_date=cached_date  # Store offset-naive datetime
-                )
+            # Convert fetched_tweet.created_at to naive datetime
+            created_at = parser.isoparse(fetched_tweet.created_at) if isinstance(fetched_tweet.created_at,
+                                                                                 str) else fetched_tweet.created_at
+            if created_at.tzinfo is not None:
+                created_at = created_at.astimezone(timezone.utc).replace(tzinfo=None)
 
-            # Ensure both dates are offset-naive
-            if cached_date != tweet_date:
-                logger.warning(
-                    f"Tweet date mismatch for tweet_id {tweet_id}: expected {cached_date}, got {tweet_date}."
-                )
-                return 0.5
+            await self.tweet_cache_manager.store_tweet_cache(
+                tweet_id=tweet_id,
+                tweet_date=created_at  # Always store as naive datetime
+            )
 
-            return 1.0
+            return 1.0 * freshness_factor
+
         except Exception as e:
             logger.error(f"Error validating tweet: {e}")
             return None
@@ -344,25 +408,47 @@ class Validator:
                 logger.warning("Missing or invalid user ID.")
                 return None
 
+            # Retrieve cached data
             cached_user = await self.user_cache_manager.get_user_cache(user_id)
             if cached_user:
                 logger.info(f"User data retrieved from cache for user_id {user_id}")
-            else:
-                fetched_user = self.twitter_service.get_user_details(user_id)
-                if not fetched_user:
-                    logger.warning(f"User not found for user_id {user_id}.")
-                    return 0.0
+                return 1.0
 
-                await self.user_cache_manager.store_user_cache(
-                    user_id=user_id,
-                    follower_count=fetched_user.followers_count,
-                    verified=fetched_user.verified
-                )
+            # Fetch live data if not cached
+            fetched_user = self.twitter_service.get_user_details(user_id)
+            if not fetched_user:
+                logger.warning(f"User not found for user_id {user_id}.")
+                return None
+
+            await self.user_cache_manager.store_user_cache(
+                user_id=user_id,
+                follower_count=fetched_user.followers_count,
+                verified=fetched_user.verified
+            )
 
             return 1.0
+
         except Exception as e:
             logger.error(f"Error validating user: {e}")
             return None
+
+    def _smooth_score(self, validated_entries: int, total_entries: int) -> float:
+        """
+        Calculate a smooth score using exponential growth with diminishing returns.
+
+        Args:
+            validated_entries (int): Number of valid entries.
+            total_entries (int): Total number of entries.
+
+        Returns:
+            float: Smooth score between 0 and 1.
+        """
+        if total_entries == 0:
+            return 0.0
+
+        accuracy = validated_entries / total_entries
+        return 1 - math.exp(-accuracy * 5)  # Exponential growth with diminishing returns
+
 
     async def validate_step(self, netuid: int, settings: ValidatorSettings) -> None:
         """
