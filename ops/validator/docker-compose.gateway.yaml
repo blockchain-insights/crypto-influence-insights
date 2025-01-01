@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  memgraph:
+    container_name: scraping-results-memgraph
+    image: memgraph/memgraph-mage:1.22-memgraph-2.22
+    ports:
+      - "7687:7687"
+      - "7444:7444"
+    environment:
+      - MEMGRAPH_USER=${GRAPH_DB_USER:-mario}
+      - MEMGRAPH_PASSWORD=${GRAPH_DB_PASSWORD:-securepassword123}
+    command: [
+      "--storage-properties-on-edges=true",
+      "--storage-enable-schema-metadata=true",
+      "--storage-recovery-thread-count=20",
+      "--storage-gc-cycle-sec=300",
+      "--log-level=INFO",
+      "--storage-snapshot-on-exit=false",
+      "--storage-snapshot-interval-sec=14400",
+      "--storage-snapshot-retention-count=2",
+      "--storage-wal-enabled=true",
+      "--isolation-level=READ_COMMITTED",
+      "--replication-restore-state-on-startup=true",
+      "--query-execution-timeout-sec=60"
+    ]
+    volumes:
+      - scraping-results-memgraph-data:/var/lib/memgraph
+      - scraping-results-memgraph-log:/var/log/memgraph
+      - scraping-results-memgraph-etc:/etc/memgraph
+    restart: unless-stopped
+
+  memgraph-lab:
+    image: memgraph/lab:latest
+    container_name: memgraph-lab
+    ports:
+      - "3000:3000"
+    environment:
+      - QUICK_CONNECT_MG_HOST=scraping-results-memgraph
+      - QUICK_CONNECT_MG_PORT=7687
+    restart: unless-stopped
+
+  postgres:
+    container_name: postgres-sn22
+    image: postgres:16.3-alpine3.20
+    ports:
+      - "5432:5432"
+    volumes:
+      - "postgres-data-validator:/var/lib/postgresql/data"
+      - "./init.sql:/docker-entrypoint-initdb.d/init.sql"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-validator}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeit456$}
+    restart: unless-stopped
+
+  postgres_backup:
+    image: postgres:16.3-alpine3.20
+    container_name: postgres_backup-sn22
+    depends_on:
+      - postgres
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-validator}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeit456$}
+    volumes:
+      - ./backup:/backup # Mounting backup directory on host
+    entrypoint: [ "sh", "-c", "PGPASSWORD=$${POSTGRES_PASSWORD} pg_dump --dbname=postgresql://$${POSTGRES_USER}@postgres-sn22:5432/$${POSTGRES_DB} > /backup/backup_$$(date +\"%Y-%m-%d_%H-%M-%S\").sql" ]
+
+  redis:
+    image: redis:alpine
+    container_name: redis-sn22
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  postgres-data-validator:
+    name: postgres-data-validator
+  scraping-results-memgraph-data:
+    name: scraping-results-memgraph-data
+  scraping-results-memgraph-log:
+    name: scraping-results-memgraph-log
+  scraping-results-memgraph-etc:
+    name: scraping-results-memgraph-etc

@@ -68,11 +68,15 @@ ITERATION_INTERVAL=50
 MAX_ALLOWED_WEIGHTS=64
 NET_UID=22
 
+GRAPH_DB_USER=mario
+GRAPH_DB_PASSWORD=securepassword123
+GRAPH_DB_URL="bolt://localhost:7687"
+
 POSTGRES_DB=validator1
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=changeit456$
+POSTGRES_PASSWORD={your-password}
 
-DATABASE_URL=postgresql+asyncpg://postgres:changeit456$@localhost:5432/validator1
+DATABASE_URL=postgresql+asyncpg://postgres:{your-password}@localhost:5432/validator1
 
 API_RATE_LIMIT=1000
 REDIS_URL=redis://localhost:6379/0
@@ -83,6 +87,7 @@ PORT=9900
 WORKERS=1
 
 TWITTER_BEARER_TOKENS=<you_twitter_API_bearer_tokens_separated_with_a_comma>
+ENABLE_GATEWAY=True
 ```
 
 #### Validator wallet creation
@@ -95,40 +100,48 @@ comx module register validator1 validator1 22 --port 9900
 # stake COMAI to your validator wallet
 ```
 
-#### Validator metadata configuration
+## Validator Configuration
 
-For validators participating in organic query support (running a gateway), it's necessary to register or update the validator with specific metadata. This metadata includes the gateway endpoint information that other validators will use to sync receipts with your validator.
+### ENABLE_GATEWAY Flag
 
-If you're registering a new validator with metadata:
-```shell
-comx module register validator validator_name 22 --metadata '{"gateway":"http://your-validator-gateway-ip:9900"}'
-```
+The `ENABLE_GATEWAY` flag defines how the validator operates:
 
-If you need to update the metadata for an existing validator:
-```shell
-comx module update validator_name 22 --metadata '{"gateway":"http://your-validator-gateway-ip:9900"}'
-```
+- **`ENABLE_GATEWAY=True`**: This indicates the validator is running with a gateway. In this mode, the validator requires a Memgraph instance (running locally or in a separate instance). The validator will expose an API and write validation data to Memgraph.
 
-Replace `validator_name` with your validator's name and adjust the gateway URL to match your validator's actual endpoint. The gateway URL should be accessible from the internet if you want other nodes to be able to query your validator.
+- **`ENABLE_GATEWAY=False`**: In this mode, the validator operates without a gateway. It validates JSON datasets and scores miners but does not interact with Memgraph or expose an API.
 
-Important considerations:
-- Make sure your firewall allows incoming connections to your gateway port
-- Use HTTPS if possible for production environments
-- Ensure the gateway URL is stable and persistent
-- The metadata update is required for participation in the organic query network
+## Starting the Infrastructure for the Validator
 
+To start the required infrastructure for the validator:
 
-### Running the validator and monitoring
+1. Navigate to the `ops` directory:
+   ```shell
+   cd ./ops/validator
+   ```
 
-Start required infrastructure by navigating to ops directory and running the following commands:
-```shell
-cp ./env/.env.validator.mainnet ./ops/validator/.env
-cd ./ops/validator
-chmod 644 .env
-docker compose up -d
-```
+2. Copy the appropriate environment configuration file:
+   ```shell
+   cp ./env/.env.validator.mainnet ./ops/validator/.env
+   ```
 
-Then run the validator:
+3. Adjust file permissions:
+   ```shell
+   chmod 644 .env
+   ```
+
+4. Start the infrastructure using Docker Compose:
+
+For configurations without a gateway (just validation):
+   ```shell
+   docker compose -f docker-compose.yaml up -d
+   ```
+For configurations with a gateway:
+   ```shell
+   docker compose -f docker-compose.gateway.yaml up -d
+   ```
+
+## Starting the Validator
+
 ```shell
 # use pm2 to run the validator
 cd ~/validator1
