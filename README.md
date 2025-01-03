@@ -46,11 +46,11 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
 ---
 
 ### **V2: Immediate User-Facing Value**
-- **V2.0: Receipt System for Subnet APIs (Completed):**
+- **V2.0: Receipt System for Subnet APIs (Completed)**
   - Develop a receipt mechanism for API usage to track work performed by miners, validators, and other subnet participants.
   - Ensure transparency and accountability for all API transactions.
 
-- **V2.1: Lightweight Miners and Centralized JSON Storage (In Progress):**
+- **V2.1: Lightweight Miners and Centralized JSON Storage (Completed)**
   - **Deprecate Neo4j on Miners**:
     - Miners will generate raw JSON datasets instead of populating Neo4j.
   - **Centralized Storage on Validators**:
@@ -61,17 +61,22 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
   - **Scoring Adjustments**:
     - Update the scoring mechanism to validate and rank JSON-based datasets.
 
-- **V2.2: Add Time-Series Data Support (Stage 2):**
-  - Integrate **ClickHouse** for efficient storage of historical time-series data.
-  - Enable aggregation of past trends for influencer activity, token mentions, and anomaly detection.
+- **V2.2: Public APIs for Basic Insights and Enhanced Access**
+  - **End User API Features**:
+    - Enable public queries for:
+      - **Influencer Rankings** for specific tokens.
+      - **Scam Alerts** based on graph heuristics (real-time Memgraph insights).
+      - **Token Activity Snapshots**, including:
+        - Daily/weekly token mentions.
+        - Associated tweets/posts per token.
+    - Provide access to **specific datasets**, such as:
+      - Top 5 influencers by engagement for a token.
+      - Most active tokens in the last 24 hours.
+      - High-risk tokens flagged by anomaly detection.
+  - **Free-Tier API**:
+    - Offer free-tier API access to attract users and promote adoption.
 
-- **V2.3: Public Access APIs for Basic Insights:**
-  - Enable end users to query basic information such as:
-    - Influencer rankings for specific tokens.
-    - Scam alerts based on **graph heuristics** (real-time Memgraph insights).
-  - Provide a free-tier API for public access to attract initial users.
-
-- **V2.4: Real-Time Scam Detection Using Graph-Based ML Models:**
+- **V2.3: Real-Time Scam Detection Using Graph-Based ML Models**
   - **Model Training**:
     - Train ML models using **graph data** from Memgraph.
     - Leverage **Memgraph’s AI ecosystem** for model development (graph embeddings, ML libraries).
@@ -82,7 +87,7 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
       - A Twitter bot.
       - Webhook subscriptions for developers and advanced users.
 
-- **V2.5: Token Watchlist Feature:**
+- **V2.4: Token Watchlist Feature**
   - Allow users to monitor specific tokens and receive:
     - Alerts on influencer activity.
     - Notifications when a token’s risk score changes.
