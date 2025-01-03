@@ -85,9 +85,9 @@ def run_migrations():
     import os
     from pathlib import Path
 
-    # Resolve the path to the `alembic.ini` file
-    script_directory = Path(__file__).parent.parent  # Go up one level from `validator/database`
-    execution_path = script_directory / "validator" / "database"  # Point to `database` folder
+    # Resolve the correct path to the `alembic.ini` file
+    script_directory = Path(__file__).parent.parent  # One level up to `validator`
+    execution_path = script_directory / "database"  # Point to `validator/database`
 
     # Backup command
     if os.getenv("SKIP_BACKUP", "False") == "False":
@@ -107,7 +107,7 @@ def run_migrations():
         command = ["alembic", "upgrade", "head"]
         migration_result = subprocess.run(
             command,
-            cwd=str(execution_path),  # Set cwd to the folder containing `alembic.ini`
+            cwd=str(execution_path),  # Correctly set cwd to `validator/database`
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
