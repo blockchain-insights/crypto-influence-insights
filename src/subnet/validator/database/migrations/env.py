@@ -1,61 +1,46 @@
+import os
+import sys
+
+# Dynamically add the project root directory to sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "../../../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import asyncio
 import os
 from contextvars import ContextVar
 from logging.config import fileConfig
 from typing import Any
 from alembic.runtime.environment import EnvironmentContext
-from dotenv import load_dotenv
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-from alembic import context
+from src.subnet.validator.database.migrations.settings import ValidatorMigrationSettings, load_environment
 
-from migrations.settings import MigrationSettings
-from src.subnet.validator.database import OrmBase
-
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+# Alembic Config object
 config = context.config
 
-section = config.config_ini_section
-current_url = config.get_main_option("sqlalchemy.url", None)
-
-if not os.environ.get("DATABASE_URL"):
-    load_dotenv()
-
-migration_settings = MigrationSettings()
+# Load the environment from Alembic CLI arguments or default to mainnet
+env = context.get_x_argument(as_dictionary=True).get("env", "mainnet")
+load_environment(env)  # Pass the environment dynamically
+migration_settings = ValidatorMigrationSettings()
 config.set_main_option("sqlalchemy.url", migration_settings.DATABASE_URL)
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# Logging configuration
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
+# Metadata for autogenerate support
+from src.subnet.validator.database import OrmBase
 target_metadata = OrmBase.metadata
-
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
 
 ctx_var: ContextVar[dict[str, Any]] = ContextVar("ctx_var")
 
+
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-
-    """
+    """Run migrations in offline mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -87,11 +72,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    """In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-
+    """Run migrations in online mode with an async engine."""
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -105,12 +86,9 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
-
     try:
         current_loop = asyncio.get_running_loop()
     except RuntimeError:
-        # there is no loop, can use asyncio.run
         asyncio.run(run_async_migrations())
         return
 
@@ -119,7 +97,6 @@ def run_migrations_online() -> None:
         "script": context.script,
         "opts": context._proxy.context_opts,  # type: ignore
     })
-    # conftest.MIGRATION_TASK = asyncio.create_task(run_async_migrations())
 
 
 if context.is_offline_mode():

@@ -4,10 +4,9 @@ from fastapi import FastAPI
 from loguru import logger
 from starlette.middleware.cors import CORSMiddleware
 import sys
-from src.subnet.gateway import patch_record, settings, receipt_sync_fetch_thread, validator
+from src.subnet.gateway import patch_record, settings, validator
 from src.subnet.gateway.rate_limiter import RateLimiterMiddleware
 from src.subnet.gateway.routes.v1.twitter_fraud_detection import twitter_fraud_detection_router
-from src.subnet.gateway.routes.v1.snapshots import snapshot_router
 from src.subnet.gateway.routes.v1.miners import miner_router
 
 logger.remove()
@@ -29,15 +28,17 @@ logger.add(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    receipt_sync_fetch_thread.start()
-    logger.info("Gateway sync started successfully.")
-    yield
-    # Shutdown
-    logger.info("Initiating graceful shutdown...")
-    if validator and receipt_sync_fetch_thread:
-        validator.terminate_event.set()
-        receipt_sync_fetch_thread.join()
-        logger.info("Gateway sync stopped successfully.")
+    logger.info("Application startup initiated.")
+    try:
+        # Add any other necessary startup logic here
+        logger.info("Application started successfully.")
+        yield
+    finally:
+        # Shutdown
+        logger.info("Initiating graceful shutdown...")
+        if validator:
+            validator.terminate_event.set()
+        logger.info("Application shutdown completed.")
 
 app = FastAPI(
     lifespan=lifespan,
@@ -47,7 +48,6 @@ app = FastAPI(
 )
 
 app.include_router(twitter_fraud_detection_router)
-app.include_router(snapshot_router)
 app.include_router(miner_router)
 app.add_middleware(RateLimiterMiddleware, redis_url=settings.REDIS_URL, max_requests=settings.API_RATE_LIMIT,
                    window_seconds=60)

@@ -77,12 +77,11 @@ MINER_NAME=miner1
 TOKEN=TAO
 PORT=9962
 
-GRAPH_DATABASE_URL={put_proper_value_here}
-GRAPH_DATABASE_USER={put_proper_value_here}
-GRAPH_DATABASE_PASSWORD={put_proper_value_here}
+POSTGRES_PASSWORD={your-password}
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+DATABASE_URL=postgresql+asyncpg://postgres:{your-password}@localhost:5432/indexer_db
 
-PINATA_API_KEY={your_pinata_api_key}
-PINATA_SECRET_API_KEY={your_pinata_secret_api_key}
 ```
  
 #### Miner wallet creation

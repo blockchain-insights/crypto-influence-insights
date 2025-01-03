@@ -8,9 +8,7 @@ After changing tables
 in staff/alembic/versions folder.
 """
 from .base_model import OrmBase
-from .models.miner_discovery import MinerDiscovery
+from .models.dataset_links import DatasetLink
 from .session_manager import db_manager, get_session
-from .models.tweet_cache import TweetCache
-from .models.user_cache import UserCache
 
-__all__ = ["OrmBase", "get_session", "db_manager", "MinerDiscovery", "TweetCache", "UserCache"]
+__all__ = ["OrmBase", "get_session", "db_manager", "DatasetLink"]

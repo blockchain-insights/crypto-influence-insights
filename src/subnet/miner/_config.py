@@ -26,13 +26,10 @@ class MinerSettings(BaseSettings):
     PORT: int = 9962
     WORKERS: int = 4
 
-    GRAPH_DB_TYPE: str = "neo4j"
-    GRAPH_DATABASE_USER: str
-    GRAPH_DATABASE_PASSWORD: str
-    GRAPH_DATABASE_URL: str
-
-    PINATA_API_KEY: str
-    PINATA_SECRET_API_KEY: str
+    POSTGRES_PASSWORD: str
+    POSTGRES_HOST: str
+    POSTGRES_PORT: int
+    DATABASE_URL: str
 
     class Config:
         extra = 'ignore'

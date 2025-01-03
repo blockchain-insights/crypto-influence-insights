@@ -37,3 +37,4 @@ services:
 
 volumes:
   postgres-data-validator:
+    name: postgres-data-validator

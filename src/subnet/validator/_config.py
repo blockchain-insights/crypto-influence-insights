@@ -45,16 +45,22 @@ class ValidatorSettings(BaseSettings):
 
     TWITTER_BEARER_TOKENS: str
 
+    ENABLE_GATEWAY: bool = False
+
     PORT: int = 9900
     WORKERS: int = 4
+
+    GRAPH_DB_USER: str
+    GRAPH_DB_PASSWORD: str
+    GRAPH_DB_URL: str
 
     WEIGHTS_FILE_NAME: str = 'weights.pkl'
     DATABASE_URL: str
     API_RATE_LIMIT: int
     REDIS_URL: str
 
-    QUERY_TIMEOUT: int   # cross check query timeout
-    CHALLENGE_TIMEOUT: int  # challenge and llm challenge time
+    QUERY_TIMEOUT: int = 10   # cross check query timeout
+    CHALLENGE_TIMEOUT: int    # challenge and llm challenge time
     SNAPSHOT_TIMEOUT: int
 
     RECEIPT_SYNC_FREQUENCY: int = 3600

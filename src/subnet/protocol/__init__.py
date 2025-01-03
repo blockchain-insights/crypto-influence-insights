@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 class Discovery(BaseModel):
     token: str = Field("PEPE", title="Token to scrape info for")
     version: float = Field(1.0, title="The version of the discovery")
-    graph_db: str = Field("neo4j", title="The graph database type")
+    dataset_link: str = Field(..., title="A link to the miner dataset with scraped data")
 
 
 class TwitterChallenge(BaseModel):
