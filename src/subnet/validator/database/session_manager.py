@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-
 from loguru import logger
 
 
@@ -18,17 +17,15 @@ class DatabaseSessionManager:
         self._sessionmaker: Optional[async_sessionmaker[AsyncSession]] = None
 
     def init(self, db_url: str) -> None:
-        # Just additional example of customization.
-        # you can add parameters to init and so on
+        # Customize connection arguments for specific databases
         if "postgresql" in db_url:
-            # These settings are needed to work with pgbouncer in transaction mode
-            # because you can't use prepared statements in such case
             connect_args = {
                 "statement_cache_size": 0,
                 "prepared_statement_cache_size": 0,
             }
         else:
             connect_args = {}
+
         self._engine = create_async_engine(
             url=db_url,
             pool_pre_ping=True,
@@ -75,21 +72,36 @@ db_manager = DatabaseSessionManager()
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    # This is Fastapi dependency
-    # session: AsyncSession = Depends(get_session)
+    """
+    FastAPI dependency to get a database session.
+    Usage: session: AsyncSession = Depends(get_session)
+    """
     async with db_manager.session() as session:
         yield session
 
 
 def run_migrations():
+    """
+    Run database migrations using Alembic.
+    """
     import subprocess
+    import inspect
+
+    # Determine the path to alembic.ini dynamically
+    current_file = inspect.getfile(inspect.currentframe())
+    execution_path = os.path.join(os.path.dirname(os.path.abspath(current_file)), "..")
+
     if os.getenv('SKIP_BACKUP', 'False') == 'False':
         backup_result = subprocess.run(['docker', 'start', 'postgres_backup'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if backup_result.stdout:
             logger.warning(backup_result.stdout)
+        if backup_result.stderr:
+            logger.error(backup_result.stderr)
 
     if os.getenv('SKIP_MIGRATIONS', 'False') == 'False':
         command = 'alembic upgrade head'
         migration_result = subprocess.run(command, shell=True, capture_output=True, text=True, cwd=execution_path)
         if migration_result.stdout:
             logger.warning(migration_result.stdout)
+        if migration_result.stderr:
+            logger.error(migration_result.stderr)
