@@ -511,6 +511,8 @@ class Validator:
                 ipfs_link=discovery.dataset_link
             )
 
+            await self.miner_discovery_manager.update_miner_rank(miner_metadata['key'], miner_metadata['emission'])
+
             # Score dataset
             dataset = await Validator._fetch_and_validate_dataset(
                 discovery.dataset_link, self.graph_handler, discovery.token, self.settings.ENABLE_GATEWAY
