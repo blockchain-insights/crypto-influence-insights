@@ -81,26 +81,37 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 def run_migrations():
-    """
-    Run database migrations using Alembic.
-    """
     import subprocess
-    import inspect
+    import os
+    from pathlib import Path
 
-    # Determine the path to alembic.ini dynamically
-    current_file = inspect.getfile(inspect.currentframe())
-    execution_path = os.path.join(os.path.dirname(os.path.abspath(current_file)), "..")
+    # Resolve the path to the `alembic.ini` file
+    script_directory = Path(__file__).parent.parent  # Go up one level from `validator/database`
+    execution_path = script_directory / "validator" / "database"  # Point to `database` folder
 
-    if os.getenv('SKIP_BACKUP', 'False') == 'False':
-        backup_result = subprocess.run(['docker', 'start', 'postgres_backup'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # Backup command
+    if os.getenv("SKIP_BACKUP", "False") == "False":
+        backup_result = subprocess.run(
+            ["docker", "start", "postgres_backup"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         if backup_result.stdout:
             logger.warning(backup_result.stdout)
         if backup_result.stderr:
             logger.error(backup_result.stderr)
 
-    if os.getenv('SKIP_MIGRATIONS', 'False') == 'False':
-        command = 'alembic upgrade head'
-        migration_result = subprocess.run(command, shell=True, capture_output=True, text=True, cwd=execution_path)
+    # Migration command
+    if os.getenv("SKIP_MIGRATIONS", "False") == "False":
+        command = ["alembic", "upgrade", "head"]
+        migration_result = subprocess.run(
+            command,
+            cwd=str(execution_path),  # Set cwd to the folder containing `alembic.ini`
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         if migration_result.stdout:
             logger.warning(migration_result.stdout)
         if migration_result.stderr:
