@@ -84,35 +84,51 @@ def run_migrations():
     import subprocess
     import os
     from pathlib import Path
+    from loguru import logger  # Assuming loguru is already imported for logging
+
+    logger.debug(f"PATH: {os.environ['PATH']}")
 
     # Resolve the correct path to the `alembic.ini` file
-    script_directory = Path(__file__).parent.parent  # One level up to `validator`
-    execution_path = script_directory / "database"  # Point to `validator/database`
+    script_directory = Path(__file__).parent.parent  # Adjust as needed
+    execution_path = script_directory / "database"  # Points to `validator/database`
 
-    # Backup command
-    if os.getenv("SKIP_BACKUP", "False") == "False":
-        backup_result = subprocess.run(
-            ["docker", "start", "postgres_backup"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if backup_result.stdout:
-            logger.warning(backup_result.stdout)
-        if backup_result.stderr:
-            logger.error(backup_result.stderr)
+    # Log the resolved execution path for debugging
+    logger.debug(f"Execution path for alembic: {execution_path}")
+
+    # Verify that alembic.ini exists
+    if not (execution_path / "alembic.ini").exists():
+        raise FileNotFoundError(f"Alembic.ini not found in {execution_path}")
 
     # Migration command
     if os.getenv("SKIP_MIGRATIONS", "False") == "False":
-        command = ["alembic", "upgrade", "head"]
+        # Use full path to alembic if required
+        from shutil import which
+        alembic_path = which("alembic")
+        if not alembic_path:
+            raise FileNotFoundError("Alembic executable not found. Ensure it is installed and in the PATH.")
+
+        # Construct the Alembic command
+        command = [alembic_path, "upgrade", "head"]
+
+        # Ensure the environment contains the correct PATH
+        env = os.environ.copy()
+        logger.debug(f"Environment PATH: {env['PATH']}")
+
+        # Run the migration
         migration_result = subprocess.run(
             command,
-            cwd=str(execution_path),  # Correctly set cwd to `validator/database`
+            cwd=str(execution_path),  # Set cwd to `validator/database`
+            env=env,  # Pass the updated environment
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
         if migration_result.stdout:
-            logger.warning(migration_result.stdout)
+            logger.warning(f"Migration stdout: {migration_result.stdout}")
         if migration_result.stderr:
-            logger.error(migration_result.stderr)
+            if "ERROR" in migration_result.stderr.upper():  # Log only actual errors
+                logger.error(f"Migration stderr: {migration_result.stderr}")
+            else:
+                logger.info(f"Alembic stderr (non-critical): {migration_result.stderr}")
+
+    logger.info("Migrations completed successfully.")

@@ -14,8 +14,6 @@ langchain
 langchain-openai
 langchain_community
 transformers
-python-bitcoinrpc
-bitcoin
 base58
 pycryptodome
 jinja2
