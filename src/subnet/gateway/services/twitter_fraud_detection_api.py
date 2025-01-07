@@ -58,8 +58,8 @@ class TwitterFraudDetectionApi(QueryApi):
         """
 
         # Add verified filter if specified
-        if verified:
-            query += " AND u.is_verified = true"
+        if verified is not None:
+            query += f" AND u.is_blue_verified = {'true' if verified else 'false'}"
 
         # Add time period filter if specified
         if time_period:
@@ -76,7 +76,7 @@ class TwitterFraudDetectionApi(QueryApi):
 
         # Add sorting and return clause
         query += f"""
-        RETURN u.user_id AS user_id, u.username AS user_name, u.follower_count AS follower_count, u.is_verified AS verified,
+        RETURN u.user_id AS user_id, u.username AS user_name, u.follower_count AS follower_count, u.is_blue_verified AS verified,
                u.engagement_level AS engagement_level, u.total_tweets AS total_tweets,
                (u.follower_count * u.engagement_level) AS combined_score
         ORDER BY combined_score DESC, u.total_tweets DESC
