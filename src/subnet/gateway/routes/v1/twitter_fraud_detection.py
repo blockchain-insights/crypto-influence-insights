@@ -26,21 +26,35 @@ async def get_user_engagement_trends(
     return format_response(data, response_type)
 
 
-@twitter_fraud_detection_router.get("/{token}/detect-influencers", summary="Detect Influencers", description="Identify top influencers for a specified token based on follower count and engagement.")
+@twitter_fraud_detection_router.get(
+    "/{token}/detect-influencers",
+    summary="Detect Influencers",
+    description="Identify top influencers for a specified token based on follower count, engagement, and other criteria."
+)
 async def detect_influencers(
     token: str,
     min_follower_count: int = Query(1000, description="Minimum follower count to qualify as an influencer"),
     limit: int = Query(10, description="Number of top influencers to return"),
+    time_period: int = Query(None, description="Time period (in days) to filter tweets"),
+    min_tweet_count: int = Query(0, description="Minimum number of tweets to qualify as an influencer"),
+    verified: bool = Query(None, description="Filter for verified influencers (true/false)"),
     response_type: ResponseType = Query(ResponseType.json),
     validator: Validator = Depends(get_validator)
 ):
     """
-    Identify top influencers for a specified token based on follower count and engagement.
+    Identify top influencers for a specified token based on follower count, engagement, and optional filters.
     """
     query_api = TwitterFraudDetectionApi(validator)
-    data = await query_api.get_influencers(token=token, min_follower_count=min_follower_count, limit=limit)
-
+    data = await query_api.get_influencers(
+        token=token,
+        min_follower_count=min_follower_count,
+        limit=limit,
+        time_period=time_period,
+        min_tweet_count=min_tweet_count,
+        verified=verified
+    )
     return format_response(data, response_type)
+
 
 
 @twitter_fraud_detection_router.get("/{token}/detect-similarity", summary="Detect User Similarity", description="Find users with similar activity or engagement patterns for a specified token based on a similarity threshold.")

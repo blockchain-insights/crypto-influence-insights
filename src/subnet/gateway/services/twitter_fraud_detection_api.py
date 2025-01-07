@@ -41,15 +41,49 @@ class TwitterFraudDetectionApi(QueryApi):
         result = await self._execute_query(token, query)
 
         return result
-    async def get_influencers(self, token: str, min_follower_count: int = 1000, limit: int = 10) -> dict:
+
+    async def get_influencers(
+            self,
+            token: str,
+            min_follower_count: int = 1000,
+            limit: int = 10,
+            time_period: int = None,  # Time period in days
+            min_tweet_count: int = 0,  # Minimum tweet count
+            verified: bool = None  # Filter for verified users
+    ) -> dict:
+        # Base query
         query = f"""
-        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
         WHERE u.follower_count >= {min_follower_count} AND u.engagement_level > 0
-        RETURN u.user_id AS user_id, u.username AS user_name, u.follower_count AS follower_count, 
-               COUNT(t) AS tweet_count, AVG(u.engagement_level) AS avg_engagement_level
-        ORDER BY avg_engagement_level DESC, tweet_count DESC
+        """
+
+        # Add verified filter if specified
+        if verified:
+            query += " AND u.is_verified = true"
+
+        # Add time period filter if specified
+        if time_period:
+            query += f"""
+            AND datetime(replace(split(t.timestamp, '+')[0], ' ', 'T') + 'Z') >= datetime() - duration('P{time_period}D')
+            """
+
+        # Ensure DISTINCT users
+        query += " WITH DISTINCT u"
+
+        # Add min_tweet_count filter if specified
+        if min_tweet_count > 0:
+            query += f" WHERE u.total_tweets >= {min_tweet_count}"
+
+        # Add sorting and return clause
+        query += f"""
+        RETURN u.user_id AS user_id, u.username AS user_name, u.follower_count AS follower_count, u.is_verified AS verified,
+               u.engagement_level AS engagement_level, u.total_tweets AS total_tweets,
+               (u.follower_count * u.engagement_level) AS combined_score
+        ORDER BY combined_score DESC, u.total_tweets DESC
         LIMIT {limit}
         """
+
+        # Execute the query
         result = await self._execute_query(token, query)
         return result
 
