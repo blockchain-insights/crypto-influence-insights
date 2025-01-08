@@ -10,21 +10,25 @@ from src.subnet.gateway import get_validator
 twitter_fraud_detection_router = APIRouter(prefix="/v1/twitter-fraud-detection", tags=["twitter-fraud-detection"])
 
 
-@twitter_fraud_detection_router.get("/{token}/get-engagement-trends", summary="Get User Engagement Trends", description="Analyze and retrieve daily engagement trends for a specified token over a given time period.")
+@twitter_fraud_detection_router.get(
+    "/{token}/get-engagement-trends",
+    summary="Get User Engagement Trends",
+    description="Analyze and retrieve daily engagement trends for a specified token over a given time period, optionally filtered by region."
+)
 async def get_user_engagement_trends(
     token: str,
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze engagement trends"),
+    region: str = Query(None, description="Filter engagement trends by region"),
     response_type: ResponseType = Query(ResponseType.json),
     validator: Validator = Depends(get_validator)
 ):
     """
-    Analyze and retrieve daily engagement trends for a specified token over a given time period.
+    Analyze and retrieve daily engagement trends for a specified token over a given time period, optionally filtered by region.
     """
     query_api = TwitterFraudDetectionApi(validator)
-    data = await query_api.get_user_engagement_trends(token=token, days=days)
+    data = await query_api.get_user_engagement_trends(token=token, days=days, region=region)
 
     return format_response(data, response_type)
-
 
 @twitter_fraud_detection_router.get(
     "/{token}/detect-influencers",

@@ -19,28 +19,44 @@ class TwitterFraudDetectionApi(QueryApi):
         except Exception as e:
             raise Exception(f"Error executing query: {str(e)}")
 
-    async def get_user_engagement_trends(self, token: str, days: int = 30) -> dict:
+    async def get_user_engagement_trends(self, token: str, days: int = 30, region: str = None) -> dict:
         """
-        Retrieves engagement trends for a specified token over the last `days`.
+        Retrieves engagement trends for a specified token over the last `days`, optionally filtered by region.
         """
-
-        # Duration string for Cypher query
         duration_str = f"P{days}D"
 
-        # Cypher query to aggregate engagement per day for a specified token
+        # Construct the query
         query = f"""
         MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
-        WHERE datetime(replace(t.timestamp, " ", "T")) >= datetime() - duration('{duration_str}')
-        RETURN toString(date(datetime(replace(t.timestamp, " ", "T")))) AS date, 
+        WHERE datetime(replace(split(t.timestamp, '+')[0], ' ', 'T') + 'Z') >= datetime() - duration('{duration_str}')
+        """
+
+        if region:
+            query += f"""
+            MATCH (u)-[:LOCATED_IN]->(r:Region)
+            WHERE r.name = '{region}'
+            """
+
+        query += """
+        RETURN date(localdatetime(replace(split(t.timestamp, '+')[0], ' ', 'T'))) AS date, 
                COUNT(DISTINCT u.user_id) AS active_users,
                SUM(u.engagement_level) AS daily_engagement
         ORDER BY date ASC
         """
 
         # Execute the query
-        result = await self._execute_query(token, query)
+        raw_result = await self._execute_query(token, query)
 
-        return result
+        if not raw_result or not raw_result.get("results"):
+            # Return empty results
+            return raw_result
+
+        # Convert date objects in the results to strings
+        for row in raw_result["results"]:
+            if "date" in row:
+                row["date"] = str(row["date"])  # Convert neo4j.time.Date to string
+
+        return raw_result
 
     async def get_influencers(
             self,
