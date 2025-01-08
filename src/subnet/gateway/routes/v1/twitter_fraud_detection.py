@@ -114,6 +114,7 @@ async def detect_anomalies(
 
     return format_response(data, response_type)
 
+
 @twitter_fraud_detection_router.get(
     "/{token}/fetch-account-analysis",
     summary="Fetch Account Analysis for Twitter Bot Content",

@@ -167,56 +167,72 @@ class TwitterFraudDetectionApi(QueryApi):
         return await self._execute_query(token, query)
 
     async def get_anomalies(self, token: str) -> dict:
-        # Query to extract key behavioral metrics, including follower count
+        # Query to extract key behavioral metrics, including regional activity and tweet volume
         query = f"""
         MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
-        WITH u, COUNT(t) AS post_count, AVG(u.engagement_level) AS avg_engagement, 
-             u.follower_count AS follower_count
-        RETURN u.user_id AS user_id, u.username AS username, post_count, avg_engagement, follower_count
+        WITH u, COUNT(t) AS tweet_count, AVG(u.engagement_level) AS avg_engagement,
+             u.follower_count AS follower_count, u.region AS region
+        RETURN u.user_id AS user_id, u.username AS username, tweet_count, avg_engagement,
+               follower_count, region
         """
         # Execute the query to get the metrics
         result = await self._execute_query(token, query)
 
-        # Log the result to inspect its structure
-        logger.info(f"Result from _execute_query: {result}")
+        # Log the raw result for debugging
+        logger.info(f"Raw query result: {result}")
 
-        # Step 2: Process results to identify anomalies
+        # Step 2: Process results to detect anomalies
         processed_results = self._detect_anomalies(result)
         return processed_results
 
     def _detect_anomalies(self, data: dict) -> dict:
-        # Check if 'response' key contains the rows as expected
-        if "response" not in data or not isinstance(data["response"], list):
+        """
+        Detect anomalies based on behavioral metrics, tweet volume spikes,
+        and regional activity. Ensures all users are labeled with at least one anomaly or 'Normal'.
+        """
+        if "results" not in data or not isinstance(data["results"], list):
             logger.error("Unexpected data format: %s", data)
             return data  # Return the original data if format is unexpected
 
-        # Extract the rows from response
-        rows = data["response"]
+        rows = data["results"]
 
-        # Extract follower counts and average engagement for calculation
-        follower_counts = [row['follower_count'] for row in rows if row.get('follower_count') is not None]
-        avg_engagements = [row['avg_engagement'] for row in rows if row.get('avg_engagement') is not None]
+        # Ensure every user gets an anomaly label
+        for user in rows:
+            # Extract relevant metrics
+            tweet_count = user.get("tweet_count", 0)
+            avg_engagement = user.get("avg_engagement", 0)
+            follower_count = user.get("follower_count", 0)
+            region = user.get("region") or "Unknown"  # Default to "Unknown" if null
 
-        # Calculate quantile thresholds for anomaly detection
-        if len(follower_counts) > 1 and len(avg_engagements) > 1:
-            low_follower_threshold = np.percentile(follower_counts, 15)
-            high_follower_threshold = np.percentile(follower_counts, 85)
-            low_engagement_threshold = np.percentile(avg_engagements, 15)
-            high_engagement_threshold = np.percentile(avg_engagements, 85)
+            # Initialize anomaly labels
+            anomaly_labels = []
 
-            # Detect anomalies based on disproportionate engagement to follower count
-            for user in rows:
-                followers = user.get('follower_count', 0)
-                engagement = user.get('avg_engagement', 0)
+            # Detect anomalies based on conditions
+            if tweet_count > 10000 and avg_engagement / tweet_count < 0.01:
+                anomaly_labels.append("High Tweets Low Engagement")
+            if tweet_count < 100 and avg_engagement / tweet_count > 0.1:
+                anomaly_labels.append("Low Tweets High Engagement")
+            if follower_count > 10000 and tweet_count < 100:
+                anomaly_labels.append("High Followers Few Tweets")
+            if tweet_count > 10000 and follower_count < 1000:
+                anomaly_labels.append("High Tweets Few Followers")
+            if follower_count >= 10000 and avg_engagement / follower_count < 0.001:
+                anomaly_labels.append("High Followers Low Engagement")
+            if follower_count <= 1000 and avg_engagement / follower_count > 0.1:
+                anomaly_labels.append("Low Followers High Engagement")
+            if tweet_count > 1000 and tweet_count / follower_count > 0.1:
+                anomaly_labels.append("High Tweet-to-Follower Ratio")
+            if region == "Unknown":
+                anomaly_labels.append("Unknown Region")
+            if tweet_count < 10 and follower_count > 100000:
+                anomaly_labels.append("High Followers Limited Activity")
 
-                # Check for high followers with low engagement or low followers with high engagement
-                is_anomalous = (
-                        (followers >= high_follower_threshold and engagement <= low_engagement_threshold) or
-                        (followers <= low_follower_threshold and engagement >= high_engagement_threshold)
-                )
+            # If no anomalies detected, mark as "Normal"
+            if not anomaly_labels:
+                anomaly_labels.append("Normal")
 
-                # Label based on anomaly status directly in the original response data
-                user['anomaly_label'] = "Anomalous" if is_anomalous else "Normal"
+            # Assign the anomaly labels to the user
+            user["anomaly_label"] = anomaly_labels
 
         # Return the modified data with labeled anomalies
         return data
