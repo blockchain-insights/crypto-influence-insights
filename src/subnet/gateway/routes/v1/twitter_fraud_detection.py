@@ -153,3 +153,36 @@ async def real_time_scam_alerts(
 
     # Return the formatted response
     return format_response(data, response_type)
+
+
+@twitter_fraud_detection_router.get(
+    "/{token}/activity-snapshot",
+    summary="Get Token Activity Snapshot",
+    description="Retrieve aggregated activity data for a specific token, including daily or weekly mentions and associated tweets."
+)
+async def get_token_activity_snapshot(
+    token: str,
+    timeframe: str = Query("7d", description="Timeframe to analyze mentions (e.g., '1d', '7d')."),
+    response_type: ResponseType = Query(ResponseType.json),
+    validator: Validator = Depends(get_validator)
+):
+    """
+    Retrieve aggregated activity data for a specific token.
+
+    Args:
+        token (str): The token to analyze.
+        timeframe (str): Timeframe for analysis (default: '7d').
+        response_type (ResponseType): Response format (default: JSON).
+        validator (Validator): Validator dependency.
+
+    Returns:
+        Formatted response containing aggregated activity data.
+    """
+    # Create an instance of the service layer
+    query_api = TwitterFraudDetectionApi(validator)
+
+    # Fetch activity snapshot using the service layer
+    data = await query_api.get_token_activity_snapshot(token=token, timeframe=timeframe)
+
+    # Return the formatted response
+    return format_response(data, response_type)

@@ -337,3 +337,55 @@ class TwitterFraudDetectionApi(QueryApi):
         """
         # Execute the query
         return await self._execute_query(token, query)
+
+    async def get_token_activity_snapshot(
+            self, token: str, timeframe: str = "7d"
+    ) -> dict:
+        """
+        Fetch aggregated activity data for a specific token within the given timeframe.
+
+        Args:
+            token (str): The token to analyze.
+            timeframe (str): The timeframe to analyze (e.g., "1d", "7d").
+
+        Returns:
+            dict: Aggregated activity data including daily or weekly mentions and associated tweets.
+        """
+        # Parse timeframe
+        match = re.match(r"(\d+)([hd])", timeframe)
+        if not match:
+            raise ValueError("Invalid timeframe format. Use formats like '1d' or '7d'.")
+
+        time_value, time_unit = int(match.group(1)), match.group(2)
+        duration_str = f"P{time_value}D" if time_unit == "d" else f"PT{time_value}H"
+
+        # Construct Cypher query
+        query = f"""
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+        WHERE datetime(replace(split(t.timestamp, '+')[0], ' ', 'T') + 'Z') >= datetime() - duration('{duration_str}')
+        RETURN date(localdatetime(replace(split(t.timestamp, '+')[0], ' ', 'T'))) AS date, 
+               COUNT(DISTINCT t) AS total_mentions,
+               COLLECT({{
+                   tweet_id: t.id,
+                   text: t.text,
+                   timestamp: t.timestamp,
+                   likes: t.likes,
+                   url: COALESCE(t.url, ''),
+                   username: u.username
+               }}) AS tweets
+        ORDER BY date DESC
+        """
+
+        # Execute the query and return results
+        raw_result = await self._execute_query(token, query)
+
+        if not raw_result or not raw_result.get("results"):
+            # Return empty results
+            return raw_result
+
+        # Convert date objects in the results to strings
+        for row in raw_result["results"]:
+            if "date" in row:
+                row["date"] = str(row["date"])  # Convert neo4j.time.Date to string
+
+        return raw_result
