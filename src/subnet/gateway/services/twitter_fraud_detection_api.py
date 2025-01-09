@@ -389,3 +389,51 @@ class TwitterFraudDetectionApi(QueryApi):
                 row["date"] = str(row["date"])  # Convert neo4j.time.Date to string
 
         return raw_result
+
+    async def get_dataset(self, token: str, dataset_type: str, params: dict) -> dict:
+        """
+        Retrieve a specific dataset type for a token.
+
+        Args:
+            token (str): The token to analyze.
+            dataset_type (str): The type of dataset to retrieve:
+            - influencers
+            - engagement_trends
+            - scam_alerts
+            - activity_snapshot
+            - anomalies
+            params (dict): Additional parameters for the dataset.
+
+        Returns:
+            dict: The requested dataset.
+        """
+        if dataset_type == "influencers":
+            return await self.get_influencers(
+                token=token,
+                min_follower_count=params.get("min_follower_count", 1000),
+                limit=params.get("limit", 10),
+                time_period=params.get("time_period"),
+                min_tweet_count=params.get("min_tweet_count", 0),
+                verified=params.get("verified")
+            )
+        elif dataset_type == "engagement_trends":
+            return await self.get_user_engagement_trends(
+                token=token,
+                days=params.get("days", 30),
+                region=params.get("region")
+            )
+        elif dataset_type == "scam_alerts":
+            return await self.get_real_time_scam_alerts(
+                token=token,
+                timeframe=params.get("timeframe", "24h"),
+                limit=params.get("limit", 100)
+            )
+        elif dataset_type == "activity_snapshot":
+            return await self.get_token_activity_snapshot(
+                token=token,
+                timeframe=params.get("timeframe", "7d")
+            )
+        elif dataset_type == "anomalies":
+            return await self.get_anomalies(token=token)
+        else:
+            raise ValueError(f"Unsupported dataset type: {dataset_type}")
