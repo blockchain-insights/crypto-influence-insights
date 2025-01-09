@@ -132,3 +132,24 @@ async def fetch_account_analysis(
     query_api = TwitterFraudDetectionApi(validator)
     data = await query_api.fetch_account_analysis(token=token, limit=limit)
     return format_response(data, response_type)
+
+
+@twitter_fraud_detection_router.get("/{token}/real-time-scam-alerts", summary="Real-Time Scam Alerts", description="Retrieve tweets or users flagged as potential scams within a recent timeframe.")
+async def real_time_scam_alerts(
+    token: str,
+    timeframe: str = Query("24h", description="Timeframe to analyze for scams, e.g., '24h' or '1d'."),
+    limit: int = Query(100, description="Maximum number of results to return."),
+    response_type: ResponseType = Query(ResponseType.json),
+    validator: Validator = Depends(get_validator)
+):
+    """
+    Retrieve tweets or users flagged as potential scams within a recent timeframe.
+    """
+    # Create an instance of the service layer
+    query_api = TwitterFraudDetectionApi(validator)
+
+    # Fetch scam alerts using the service layer
+    data = await query_api.get_real_time_scam_alerts(token=token, timeframe=timeframe, limit=limit)
+
+    # Return the formatted response
+    return format_response(data, response_type)

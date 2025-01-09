@@ -301,3 +301,39 @@ class TwitterFraudDetectionApi(QueryApi):
             )
         except Exception as e:
             raise Exception(f"Error fetching account analysis: {str(e)}")
+
+    async def get_real_time_scam_alerts(
+        self, token: str, timeframe: str, limit: int = 100
+    ) -> dict:
+        # Parse the timeframe (e.g., "24h" to 24 hours or "1d" to 1 day)
+        match = re.match(r"(\d+)([hd])", timeframe)
+        if not match:
+            raise ValueError("Invalid timeframe format. Use formats like '24h' or '1d'.")
+
+        time_value, time_unit = int(match.group(1)), match.group(2)
+        duration_str = f"PT{time_value}H" if time_unit == "h" else f"P{time_value}D"
+
+        query = f"""
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+        WHERE datetime(replace(split(t.timestamp, '+')[0], ' ', 'T') + 'Z') >= datetime() - duration('{duration_str}')
+        WITH u, t, 
+             datetime(replace(split(u.account_age, '+')[0], ' ', 'T') + 'Z') AS account_age,  // Parse account_age
+             COALESCE(t.url, '') AS tweet_url,
+             COUNT(t) AS tweet_count,
+             AVG(u.engagement_level) AS avg_engagement
+        WITH u, t, account_age, tweet_url, tweet_count, avg_engagement,
+             CASE 
+                 WHEN tweet_count > 1000 AND avg_engagement / tweet_count < 0.01 THEN 'High Activity Low Engagement'
+                 WHEN account_age >= datetime() - duration('P30D') AND tweet_count > 500 THEN 'New Account High Activity'
+                 WHEN tweet_url CONTAINS 'bit.ly' OR tweet_url CONTAINS 't.co' THEN 'Suspicious External Link'
+                 WHEN toLower(t.text) =~ ".*free.*|.*send.*|.*reward.*|.*urgent.*" THEN 'Scam Keywords in Text'
+                 ELSE NULL
+             END AS scam_flag
+        WHERE scam_flag IS NOT NULL
+        RETURN t.id AS tweet_id, t.text AS tweet_text, t.timestamp AS timestamp, 
+               u.user_id AS user_id, u.username AS username, scam_flag
+        ORDER BY timestamp DESC
+        LIMIT {limit}
+        """
+        # Execute the query
+        return await self._execute_query(token, query)
