@@ -10,9 +10,6 @@ psycopg2-binary
 asyncpg
 aioredis
 neo4j
-langchain
-langchain-openai
-langchain_community
 transformers
 base58
 pycryptodome
@@ -25,3 +22,7 @@ pytest-cov
 pytest-mock
 ratelimit
 jsonschema
+streamlit
+pandas
+matplotlib
+requests
