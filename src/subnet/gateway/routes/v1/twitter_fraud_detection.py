@@ -84,22 +84,6 @@ async def detect_similarity(
     return format_response(data, response_type)
 
 
-@twitter_fraud_detection_router.get("/{token}/detect-scam-mentions", summary="Detect Scam Mentions", description="Identify tweets or users potentially involved in scams mentioning the specified token.")
-async def detect_scam_mentions(
-    token: str,
-    timeframe: str = Query("24h", description="Timeframe to analyze mentions (e.g., 24h, 7d)."),
-    response_type: ResponseType = Query(ResponseType.json),
-    validator: Validator = Depends(get_validator)
-):
-    """
-    Identify tweets or users potentially involved in scams mentioning the specified token.
-    """
-    query_api = TwitterFraudDetectionApi(validator)
-    data = await query_api.get_scam_mentions(token=token, timeframe=timeframe)
-
-    return format_response(data, response_type)
-
-
 @twitter_fraud_detection_router.post("/{token}/detect-anomalies", summary="Detect Anomalies", description="Find anomalies in user activity or engagement for the specified token.")
 async def detect_anomalies(
     token: str,

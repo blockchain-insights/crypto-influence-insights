@@ -146,26 +146,6 @@ class TwitterFraudDetectionApi(QueryApi):
         result = await self._execute_query(token, query)
         return result
 
-    async def get_scam_mentions(self, token: str, timeframe: str) -> dict:
-        # Parse the hours from the timeframe string, e.g., "24h" to 24
-        match = re.match(r"(\d+)h", timeframe)
-        if not match:
-            raise ValueError("Invalid timeframe format. Expected format like '24h'.")
-
-        # Convert the hours to an integer
-        hours = int(match.group(1))
-
-        # Construct the duration string for Neo4j (e.g., 'PT24H' for 24 hours)
-        duration_str = f'PT{hours}H'
-
-        # Adjust the Cypher query to handle datetime comparison
-        query = f"""
-        MATCH (t:Token {{name: '{token}'}})-[:MENTIONED_IN]->(tweet:Tweet)
-        WHERE datetime(replace(tweet.timestamp, " ", "T")) >= datetime() - duration('{duration_str}')
-        RETURN tweet.id AS tweet_id, tweet.text as tweet_text, tweet.timestamp AS timestamp
-        """
-        return await self._execute_query(token, query)
-
     async def get_anomalies(self, token: str) -> dict:
         # Query to extract key behavioral metrics, including regional activity and tweet volume
         query = f"""
