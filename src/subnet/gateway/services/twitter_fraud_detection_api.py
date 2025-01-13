@@ -19,37 +19,87 @@ class TwitterFraudDetectionApi(QueryApi):
         except Exception as e:
             raise Exception(f"Error executing query: {str(e)}")
 
-    async def get_user_engagement_trends(self, token: str, days: int = 30) -> dict:
+    async def get_user_engagement_trends(self, token: str, days: int = 30, region: str = None) -> dict:
         """
-        Retrieves engagement trends for a specified token over the last `days`.
+        Retrieves engagement trends for a specified token over the last `days`, optionally filtered by region.
         """
-
-        # Duration string for Cypher query
         duration_str = f"P{days}D"
 
-        # Cypher query to aggregate engagement per day for a specified token
+        # Construct the query
         query = f"""
         MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
-        WHERE datetime(replace(t.timestamp, " ", "T")) >= datetime() - duration('{duration_str}')
-        RETURN toString(date(datetime(replace(t.timestamp, " ", "T")))) AS date, 
+        WHERE datetime(replace(split(t.timestamp, '+')[0], ' ', 'T') + 'Z') >= datetime() - duration('{duration_str}')
+        """
+
+        if region:
+            query += f"""
+            MATCH (u)-[:LOCATED_IN]->(r:Region)
+            WHERE r.name = '{region}'
+            """
+
+        query += """
+        RETURN date(localdatetime(replace(split(t.timestamp, '+')[0], ' ', 'T'))) AS date, 
                COUNT(DISTINCT u.user_id) AS active_users,
                SUM(u.engagement_level) AS daily_engagement
         ORDER BY date ASC
         """
 
         # Execute the query
-        result = await self._execute_query(token, query)
+        raw_result = await self._execute_query(token, query)
 
-        return result
-    async def get_influencers(self, token: str, min_follower_count: int = 1000, limit: int = 10) -> dict:
+        if not raw_result or not raw_result.get("results"):
+            # Return empty results
+            return raw_result
+
+        # Convert date objects in the results to strings
+        for row in raw_result["results"]:
+            if "date" in row:
+                row["date"] = str(row["date"])  # Convert neo4j.time.Date to string
+
+        return raw_result
+
+    async def get_influencers(
+            self,
+            token: str,
+            min_follower_count: int = 1000,
+            limit: int = 10,
+            time_period: int = None,  # Time period in days
+            min_tweet_count: int = 0,  # Minimum tweet count
+            verified: bool = None  # Filter for verified users
+    ) -> dict:
+        # Base query
         query = f"""
-        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
         WHERE u.follower_count >= {min_follower_count} AND u.engagement_level > 0
-        RETURN u.user_id AS user_id, u.username AS user_name, u.follower_count AS follower_count, 
-               COUNT(t) AS tweet_count, AVG(u.engagement_level) AS avg_engagement_level
-        ORDER BY avg_engagement_level DESC, tweet_count DESC
+        """
+
+        # Add verified filter if specified
+        if verified is not None:
+            query += f" AND u.is_blue_verified = {'true' if verified else 'false'}"
+
+        # Add time period filter if specified
+        if time_period:
+            query += f"""
+            AND datetime(replace(split(t.timestamp, '+')[0], ' ', 'T') + 'Z') >= datetime() - duration('P{time_period}D')
+            """
+
+        # Ensure DISTINCT users
+        query += " WITH DISTINCT u"
+
+        # Add min_tweet_count filter if specified
+        if min_tweet_count > 0:
+            query += f" WHERE u.total_tweets >= {min_tweet_count}"
+
+        # Add sorting and return clause
+        query += f"""
+        RETURN u.user_id AS user_id, u.username AS user_name, u.follower_count AS follower_count, u.is_blue_verified AS verified,
+               u.engagement_level AS engagement_level, u.total_tweets AS total_tweets,
+               (u.follower_count * u.engagement_level) AS combined_score
+        ORDER BY combined_score DESC, u.total_tweets DESC
         LIMIT {limit}
         """
+
+        # Execute the query
         result = await self._execute_query(token, query)
         return result
 
@@ -96,77 +146,73 @@ class TwitterFraudDetectionApi(QueryApi):
         result = await self._execute_query(token, query)
         return result
 
-    async def get_scam_mentions(self, token: str, timeframe: str) -> dict:
-        # Parse the hours from the timeframe string, e.g., "24h" to 24
-        match = re.match(r"(\d+)h", timeframe)
-        if not match:
-            raise ValueError("Invalid timeframe format. Expected format like '24h'.")
-
-        # Convert the hours to an integer
-        hours = int(match.group(1))
-
-        # Construct the duration string for Neo4j (e.g., 'PT24H' for 24 hours)
-        duration_str = f'PT{hours}H'
-
-        # Adjust the Cypher query to handle datetime comparison
-        query = f"""
-        MATCH (t:Token {{name: '{token}'}})-[:MENTIONED_IN]->(tweet:Tweet)
-        WHERE datetime(replace(tweet.timestamp, " ", "T")) >= datetime() - duration('{duration_str}')
-        RETURN tweet.id AS tweet_id, tweet.text as tweet_text, tweet.timestamp AS timestamp
-        """
-        return await self._execute_query(token, query)
-
     async def get_anomalies(self, token: str) -> dict:
-        # Query to extract key behavioral metrics, including follower count
+        # Query to extract key behavioral metrics, including regional activity and tweet volume
         query = f"""
         MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(:Token {{name: '{token}'}})
-        WITH u, COUNT(t) AS post_count, AVG(u.engagement_level) AS avg_engagement, 
-             u.follower_count AS follower_count
-        RETURN u.user_id AS user_id, u.username AS username, post_count, avg_engagement, follower_count
+        WITH u, COUNT(t) AS tweet_count, AVG(u.engagement_level) AS avg_engagement,
+             u.follower_count AS follower_count, u.region AS region
+        RETURN u.user_id AS user_id, u.username AS username, tweet_count, avg_engagement,
+               follower_count, region
         """
         # Execute the query to get the metrics
         result = await self._execute_query(token, query)
 
-        # Log the result to inspect its structure
-        logger.info(f"Result from _execute_query: {result}")
+        # Log the raw result for debugging
+        logger.info(f"Raw query result: {result}")
 
-        # Step 2: Process results to identify anomalies
+        # Step 2: Process results to detect anomalies
         processed_results = self._detect_anomalies(result)
         return processed_results
 
     def _detect_anomalies(self, data: dict) -> dict:
-        # Check if 'response' key contains the rows as expected
-        if "response" not in data or not isinstance(data["response"], list):
+        """
+        Detect anomalies based on behavioral metrics, tweet volume spikes,
+        and regional activity. Ensures all users are labeled with at least one anomaly or 'Normal'.
+        """
+        if "results" not in data or not isinstance(data["results"], list):
             logger.error("Unexpected data format: %s", data)
             return data  # Return the original data if format is unexpected
 
-        # Extract the rows from response
-        rows = data["response"]
+        rows = data["results"]
 
-        # Extract follower counts and average engagement for calculation
-        follower_counts = [row['follower_count'] for row in rows if row.get('follower_count') is not None]
-        avg_engagements = [row['avg_engagement'] for row in rows if row.get('avg_engagement') is not None]
+        # Ensure every user gets an anomaly label
+        for user in rows:
+            # Extract relevant metrics
+            tweet_count = user.get("tweet_count", 0)
+            avg_engagement = user.get("avg_engagement", 0)
+            follower_count = user.get("follower_count", 0)
+            region = user.get("region") or "Unknown"  # Default to "Unknown" if null
 
-        # Calculate quantile thresholds for anomaly detection
-        if len(follower_counts) > 1 and len(avg_engagements) > 1:
-            low_follower_threshold = np.percentile(follower_counts, 15)
-            high_follower_threshold = np.percentile(follower_counts, 85)
-            low_engagement_threshold = np.percentile(avg_engagements, 15)
-            high_engagement_threshold = np.percentile(avg_engagements, 85)
+            # Initialize anomaly labels
+            anomaly_labels = []
 
-            # Detect anomalies based on disproportionate engagement to follower count
-            for user in rows:
-                followers = user.get('follower_count', 0)
-                engagement = user.get('avg_engagement', 0)
+            # Detect anomalies based on conditions
+            if tweet_count > 10000 and avg_engagement / tweet_count < 0.01:
+                anomaly_labels.append("High Tweets Low Engagement")
+            if tweet_count < 100 and avg_engagement / tweet_count > 0.1:
+                anomaly_labels.append("Low Tweets High Engagement")
+            if follower_count > 10000 and tweet_count < 100:
+                anomaly_labels.append("High Followers Few Tweets")
+            if tweet_count > 10000 and follower_count < 1000:
+                anomaly_labels.append("High Tweets Few Followers")
+            if follower_count >= 10000 and avg_engagement / follower_count < 0.001:
+                anomaly_labels.append("High Followers Low Engagement")
+            if follower_count <= 1000 and avg_engagement / follower_count > 0.1:
+                anomaly_labels.append("Low Followers High Engagement")
+            if tweet_count > 1000 and tweet_count / follower_count > 0.1:
+                anomaly_labels.append("High Tweet-to-Follower Ratio")
+            if region == "Unknown":
+                anomaly_labels.append("Unknown Region")
+            if tweet_count < 10 and follower_count > 100000:
+                anomaly_labels.append("High Followers Limited Activity")
 
-                # Check for high followers with low engagement or low followers with high engagement
-                is_anomalous = (
-                        (followers >= high_follower_threshold and engagement <= low_engagement_threshold) or
-                        (followers <= low_follower_threshold and engagement >= high_engagement_threshold)
-                )
+            # If no anomalies detected, mark as "Normal"
+            if not anomaly_labels:
+                anomaly_labels.append("Normal")
 
-                # Label based on anomaly status directly in the original response data
-                user['anomaly_label'] = "Anomalous" if is_anomalous else "Normal"
+            # Assign the anomaly labels to the user
+            user["anomaly_label"] = anomaly_labels
 
         # Return the modified data with labeled anomalies
         return data
@@ -235,3 +281,139 @@ class TwitterFraudDetectionApi(QueryApi):
             )
         except Exception as e:
             raise Exception(f"Error fetching account analysis: {str(e)}")
+
+    async def get_real_time_scam_alerts(
+        self, token: str, timeframe: str, limit: int = 100
+    ) -> dict:
+        # Parse the timeframe (e.g., "24h" to 24 hours or "1d" to 1 day)
+        match = re.match(r"(\d+)([hd])", timeframe)
+        if not match:
+            raise ValueError("Invalid timeframe format. Use formats like '24h' or '1d'.")
+
+        time_value, time_unit = int(match.group(1)), match.group(2)
+        duration_str = f"PT{time_value}H" if time_unit == "h" else f"P{time_value}D"
+
+        query = f"""
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+        WHERE datetime(replace(split(t.timestamp, '+')[0], ' ', 'T') + 'Z') >= datetime() - duration('{duration_str}')
+        WITH u, t, 
+             datetime(replace(split(u.account_age, '+')[0], ' ', 'T') + 'Z') AS account_age,  // Parse account_age
+             COALESCE(t.url, '') AS tweet_url,
+             COUNT(t) AS tweet_count,
+             AVG(u.engagement_level) AS avg_engagement
+        WITH u, t, account_age, tweet_url, tweet_count, avg_engagement,
+             CASE 
+                 WHEN tweet_count > 1000 AND avg_engagement / tweet_count < 0.01 THEN 'High Activity Low Engagement'
+                 WHEN account_age >= datetime() - duration('P30D') AND tweet_count > 500 THEN 'New Account High Activity'
+                 WHEN tweet_url CONTAINS 'bit.ly' OR tweet_url CONTAINS 't.co' THEN 'Suspicious External Link'
+                 WHEN toLower(t.text) =~ ".*free.*|.*send.*|.*reward.*|.*urgent.*" THEN 'Scam Keywords in Text'
+                 ELSE NULL
+             END AS scam_flag
+        WHERE scam_flag IS NOT NULL
+        RETURN t.id AS tweet_id, t.text AS tweet_text, t.timestamp AS timestamp, 
+               u.user_id AS user_id, u.username AS username, scam_flag
+        ORDER BY timestamp DESC
+        LIMIT {limit}
+        """
+        # Execute the query
+        return await self._execute_query(token, query)
+
+    async def get_token_activity_snapshot(
+            self, token: str, timeframe: str = "7d"
+    ) -> dict:
+        """
+        Fetch aggregated activity data for a specific token within the given timeframe.
+
+        Args:
+            token (str): The token to analyze.
+            timeframe (str): The timeframe to analyze (e.g., "1d", "7d").
+
+        Returns:
+            dict: Aggregated activity data including daily or weekly mentions and associated tweets.
+        """
+        # Parse timeframe
+        match = re.match(r"(\d+)([hd])", timeframe)
+        if not match:
+            raise ValueError("Invalid timeframe format. Use formats like '1d' or '7d'.")
+
+        time_value, time_unit = int(match.group(1)), match.group(2)
+        duration_str = f"P{time_value}D" if time_unit == "d" else f"PT{time_value}H"
+
+        # Construct Cypher query
+        query = f"""
+        MATCH (u:UserAccount)-[:POSTED]->(t:Tweet)<-[:MENTIONED_IN]-(tok:Token {{name: '{token}'}})
+        WHERE datetime(replace(split(t.timestamp, '+')[0], ' ', 'T') + 'Z') >= datetime() - duration('{duration_str}')
+        RETURN date(localdatetime(replace(split(t.timestamp, '+')[0], ' ', 'T'))) AS date, 
+               COUNT(DISTINCT t) AS total_mentions,
+               COLLECT({{
+                   tweet_id: t.id,
+                   text: t.text,
+                   timestamp: t.timestamp,
+                   likes: t.likes,
+                   url: COALESCE(t.url, ''),
+                   username: u.username
+               }}) AS tweets
+        ORDER BY date DESC
+        """
+
+        # Execute the query and return results
+        raw_result = await self._execute_query(token, query)
+
+        if not raw_result or not raw_result.get("results"):
+            # Return empty results
+            return raw_result
+
+        # Convert date objects in the results to strings
+        for row in raw_result["results"]:
+            if "date" in row:
+                row["date"] = str(row["date"])  # Convert neo4j.time.Date to string
+
+        return raw_result
+
+    async def get_dataset(self, token: str, dataset_type: str, params: dict) -> dict:
+        """
+        Retrieve a specific dataset type for a token.
+
+        Args:
+            token (str): The token to analyze.
+            dataset_type (str): The type of dataset to retrieve:
+            - influencers
+            - engagement_trends
+            - scam_alerts
+            - activity_snapshot
+            - anomalies
+            params (dict): Additional parameters for the dataset.
+
+        Returns:
+            dict: The requested dataset.
+        """
+        if dataset_type == "influencers":
+            return await self.get_influencers(
+                token=token,
+                min_follower_count=params.get("min_follower_count", 1000),
+                limit=params.get("limit", 10),
+                time_period=params.get("time_period"),
+                min_tweet_count=params.get("min_tweet_count", 0),
+                verified=params.get("verified")
+            )
+        elif dataset_type == "engagement_trends":
+            return await self.get_user_engagement_trends(
+                token=token,
+                days=params.get("days", 30),
+                region=params.get("region")
+            )
+        elif dataset_type == "scam_alerts":
+            return await self.get_real_time_scam_alerts(
+                token=token,
+                timeframe=params.get("timeframe", "24h"),
+                limit=params.get("limit", 100)
+            )
+        elif dataset_type == "activity_snapshot":
+            return await self.get_token_activity_snapshot(
+                token=token,
+                timeframe=params.get("timeframe", "7d")
+            )
+        elif dataset_type == "anomalies":
+            return await self.get_anomalies(token=token)
+        else:
+            raise ValueError(f"Unsupported dataset type: {dataset_type}")

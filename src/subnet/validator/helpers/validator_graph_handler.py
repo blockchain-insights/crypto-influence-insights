@@ -78,6 +78,7 @@ class ValidatorGraphHandler:
                         ON CREATE SET 
                             ua.username = $username,
                             ua.is_verified = $is_verified,
+                            ua.is_blue_verified = $is_blue_verified,
                             ua.follower_count = $follower_count,
                             ua.account_age = $account_age,
                             ua.engagement_level = $engagement_level,
@@ -86,6 +87,7 @@ class ValidatorGraphHandler:
                         ON MATCH SET 
                             ua.username = $username,
                             ua.is_verified = $is_verified,
+                            ua.is_blue_verified = $is_blue_verified,
                             ua.follower_count = $follower_count,
                             ua.account_age = $account_age,
                             ua.engagement_level = $engagement_level,
@@ -95,6 +97,7 @@ class ValidatorGraphHandler:
                         user_id=user_account['user_id'],
                         username=user_account.get('username'),
                         is_verified=user_account.get('is_verified', False),
+                        is_blue_verified=user_account.get('is_blue_verified', False),
                         follower_count=user_account.get('follower_count', 0),
                         account_age=user_account.get('account_age', 0),
                         engagement_level=user_account.get('engagement_level', 0.0),

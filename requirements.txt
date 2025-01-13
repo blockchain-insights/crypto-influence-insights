@@ -10,12 +10,7 @@ psycopg2-binary
 asyncpg
 aioredis
 neo4j
-langchain
-langchain-openai
-langchain_community
 transformers
-python-bitcoinrpc
-bitcoin
 base58
 pycryptodome
 jinja2
@@ -27,3 +22,7 @@ pytest-cov
 pytest-mock
 ratelimit
 jsonschema
+streamlit
+pandas
+matplotlib
+requests
