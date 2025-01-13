@@ -45,52 +45,71 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
 
 ---
 
-### **V2: Immediate User-Facing Value**
-- **V2.0: Receipt System for Subnet APIs (Completed)**
-  - Develop a receipt mechanism for API usage to track work performed by miners, validators, and other subnet participants.
-  - Ensure transparency and accountability for all API transactions.
+# **V2: Immediate User-Facing Value**
 
-- **V2.1: Lightweight Miners and Centralized JSON Storage (Completed)**
-  - **Deprecate Neo4j on Miners**:
-    - Miners will generate raw JSON datasets instead of populating Neo4j.
-  - **Centralized Storage on Validators**:
-    - JSON files uploaded to IPFS will be stored as links in the validator’s discovery table.
-    - Validators will validate, merge, and feed data into **Memgraph** for real-time querying.
-  - **Improved Validator Query System**:
-    - Replace the query logic to pull insights from the validator's Memgraph instance when the validator is running a gateway.
-  - **Scoring Adjustments**:
-    - Update the scoring mechanism to validate and rank JSON-based datasets.
+## **V2.0: Receipt System for Subnet APIs (Completed)**
+- Develop a receipt mechanism for API usage to track work performed by miners, validators, and other subnet participants.
+- Ensure transparency and accountability for all API transactions.
 
-- **V2.2: Public APIs for Basic Insights and Enhanced Access**
-  - **End User API Features**:
-    - Enable public queries for:
-      - **Influencer Rankings** for specific tokens.
-      - **Scam Alerts** based on graph heuristics (real-time Memgraph insights).
-      - **Token Activity Snapshots**, including:
-        - Daily/weekly token mentions.
-        - Associated tweets/posts per token.
-    - Provide access to **specific datasets**, such as:
-      - Top 5 influencers by engagement for a token.
-      - Most active tokens in the last 24 hours.
-      - High-risk tokens flagged by anomaly detection.
-  - **Free-Tier API**:
-    - Offer free-tier API access to attract users and promote adoption.
+## **V2.1: Lightweight Miners and Centralized JSON Storage (Completed)**
+- **Deprecate Neo4j on Miners**:
+  - Miners will generate raw JSON datasets instead of populating Neo4j.
+- **Centralized Storage on Validators**:
+  - JSON files uploaded to IPFS will be stored as links in the validator’s discovery table.
+  - Validators will validate, merge, and feed data into **Memgraph** for real-time querying.
+- **Improved Validator Query System**:
+  - Replace the query logic to pull insights from the validator's Memgraph instance when the validator is running a gateway.
+- **Scoring Adjustments**:
+  - Update the scoring mechanism to validate and rank JSON-based datasets.
 
-- **V2.3: Real-Time Scam Detection Using Graph-Based ML Models**
-  - **Model Training**:
-    - Train ML models using **graph data** from Memgraph.
-    - Leverage **Memgraph’s AI ecosystem** for model development (graph embeddings, ML libraries).
-  - **API Integration**:
-    - Expose endpoints that apply trained models for real-time scam detection and influencer behavior scoring.
-  - **Scam Alerts**:
-    - Broadcast real-time scam signals via:
-      - A Twitter bot.
-      - Webhook subscriptions for developers and advanced users.
+## **V2.2: Enhanced Public APIs for Token Insights (Completed)**
+- **Expanded Endpoints**:
+  - **Influencer Rankings**:
+    - Filter influencers by time periods (e.g., last 30 days) and prioritize combined metrics like follower count and engagement.
+    - Add support for optional filters such as verified status or minimum tweets.
+  - **User Engagement Trends**:
+    - Provide token-specific daily engagement breakdowns with optional filtering by region.
+    - Offer more granular trends for detailed analysis.
+  - **Anomaly Detection**:
+    - Expand anomaly detection logic to include tweet volume spikes, regional activity, and other behavioral metrics.
+    - Offer clearer anomaly classifications (e.g., high engagement but low followers).
+  - **Real-Time Scam Alerts**:
+    - Introduce an endpoint to retrieve tweets or users flagged as scams within recent timeframes (e.g., last hour or day).
+  - **Token Activity Snapshots**:
+    - Provide aggregated token-specific data like daily mentions, associated tweets, and metadata.
+- **API Usability**:
+  - Focus on single-token support for better performance and simplicity.
+  - Streamlined endpoints with user-friendly filtering options.
 
-- **V2.4: Token Watchlist Feature**
-  - Allow users to monitor specific tokens and receive:
-    - Alerts on influencer activity.
-    - Notifications when a token’s risk score changes.
+## **V2.3: Visualization Dashboards**
+- Develop interactive dashboards using **Streamlit** to visualize API insights.
+- Dashboards will include:
+  - Influencer rankings.
+  - Engagement trends.
+  - Token activity snapshots.
+  - Scam alerts and anomaly detection data.
+- Dashboards will enhance end-user understanding and provide actionable insights.
+
+## **V2.4: Real-Time Scam Detection Using Graph-Based ML Models**
+- **Model Training**:
+  - Train ML models using **graph data** from Memgraph.
+  - Leverage **Memgraph’s AI ecosystem** for model development (graph embeddings, ML libraries).
+- **API Integration**:
+  - Expose endpoints that apply trained models for real-time scam detection and influencer behavior scoring.
+- **Scam Alerts**:
+  - Broadcast real-time scam signals via:
+    - A Twitter bot.
+    - Webhook subscriptions for developers and advanced users.
+
+## **V2.5: Token Watchlist Feature**
+- Allow users to monitor specific tokens and receive:
+  - Alerts on influencer activity.
+  - Notifications when a token’s risk score changes.
+
+## **Upcoming Enhancements**
+1. **AI/ML Training and Integration**:
+   - Expand ML model capabilities to enhance anomaly detection and scam identification.
+   - Train models on engagement trends, anomaly patterns, and real-time token activity data.
 
 ---
 
