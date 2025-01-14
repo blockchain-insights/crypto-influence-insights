@@ -1,43 +1,23 @@
 version: '3.8'
 
 services:
-  memgraph:
-    container_name: scraping-results-memgraph
-    image: memgraph/memgraph-mage:1.22-memgraph-2.22
+  neo4j:
+    container_name: validator-neo4j-sn22
+    image: neo4j:latest
     ports:
+      - "7474:7474"
       - "7687:7687"
-      - "7444:7444"
     environment:
-      - MEMGRAPH_USER=${GRAPH_DB_USER:-mario}
-      - MEMGRAPH_PASSWORD=${GRAPH_DB_PASSWORD:-securepassword123}
-    command: [
-      "--storage-properties-on-edges=true",
-      "--storage-enable-schema-metadata=true",
-      "--storage-recovery-thread-count=20",
-      "--storage-gc-cycle-sec=300",
-      "--log-level=INFO",
-      "--storage-snapshot-on-exit=false",
-      "--storage-snapshot-interval-sec=14400",
-      "--storage-snapshot-retention-count=2",
-      "--storage-wal-enabled=true",
-      "--isolation-level=READ_COMMITTED",
-      "--replication-restore-state-on-startup=true",
-      "--query-execution-timeout-sec=60"
-    ]
+      - NEO4J_AUTH=${GRAPH_DB_USER:-neo4j}/${GRAPH_DB_PASSWORD:-KGdkfCHtVumyMN}
+      - NEO4JLABS_PLUGINS=["apoc", "graph-data-science"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      - NEO4J_dbms_memory_pagecache_size=2G
+      - NEO4J_dbms_memory_heap_initial__size=2G
+      - NEO4J_dbms_memory_heap_max__size=4G
     volumes:
-      - scraping-results-memgraph-data:/var/lib/memgraph
-      - scraping-results-memgraph-log:/var/log/memgraph
-      - scraping-results-memgraph-etc:/etc/memgraph
-    restart: unless-stopped
-
-  memgraph-lab:
-    image: memgraph/lab:latest
-    container_name: memgraph-lab
-    ports:
-      - "3000:3000"
-    environment:
-      - QUICK_CONNECT_MG_HOST=scraping-results-memgraph
-      - QUICK_CONNECT_MG_PORT=7687
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+      - ./ops/neo4j/plugins:/plugins  # Mount the directory with the required plugins
     restart: unless-stopped
 
   postgres:
@@ -77,9 +57,7 @@ services:
 volumes:
   postgres-data-validator:
     name: postgres-data-validator
-  scraping-results-memgraph-data:
-    name: scraping-results-memgraph-data
-  scraping-results-memgraph-log:
-    name: scraping-results-memgraph-log
-  scraping-results-memgraph-etc:
-    name: scraping-results-memgraph-etc
+  neo4j-data:
+    name: neo4j-data
+  neo4j-logs:
+    name: neo4j-logs
