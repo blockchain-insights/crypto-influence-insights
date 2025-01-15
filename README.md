@@ -90,18 +90,28 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
   - Scam alerts and anomaly detection data.
 - Dashboards will enhance end-user understanding and provide actionable insights.
 
-## **V2.4: Real-Time Scam Detection Using Graph-Based ML Models**
-- **Model Training**:
-  - Train ML models using **graph data** from Memgraph.
-  - Leverage **Memgraph’s AI ecosystem** for model development (graph embeddings, ML libraries).
+## **V2.4: Classifier-Based Influencer and Scam Detection**
+- **Influencer Detection**:
+  - Train a classifier (e.g., XGBoost) to detect influencers based on structured data such as `follower_count`, `engagement_level`, and `is_verified`.
+  - Use graph features from Memgraph to enrich insights.
+- **Scam Detection**:
+  - Use classifiers to detect anomalies and identify scam behavior in structured graph data.
+  - Features include tweet volume spikes, engagement irregularities, and behavioral metrics.
 - **API Integration**:
-  - Expose endpoints that apply trained models for real-time scam detection and influencer behavior scoring.
-- **Scam Alerts**:
-  - Broadcast real-time scam signals via:
-    - A Twitter bot.
-    - Webhook subscriptions for developers and advanced users.
+  - Build new API endpoints leveraging classifier models for real-time influencer and scam detection.
 
-## **V2.5: Token Watchlist Feature**
+## **V2.5: LLM Integration for Contextual Enhancements**
+- Use Large Language Models (LLMs) to complement classifier models:
+  - **Influencer Detection**:
+    - Extract semantic insights from tweet content, such as sentiment and virality potential.
+    - Generate contextual relevance scores for token-related content.
+  - **Scam Detection**:
+    - Identify scam-like behavior by analyzing tweet tone, links, and repetitive patterns.
+- **Pipeline Enhancements**:
+  - Incorporate LLM-derived features into classifier models to improve detection accuracy.
+  - Introduce LLM-based endpoints for content-specific insights.
+
+## **V2.6: Token Watchlist Feature**
 - Allow users to monitor specific tokens and receive:
   - Alerts on influencer activity.
   - Notifications when a token’s risk score changes.
@@ -110,6 +120,10 @@ The subnet builds upon the legacy of blockchain data analysis while focusing on 
 1. **AI/ML Training and Integration**:
    - Expand ML model capabilities to enhance anomaly detection and scam identification.
    - Train models on engagement trends, anomaly patterns, and real-time token activity data.
+2. **Advanced Graph Analytics**:
+   - Introduce advanced graph algorithms for community detection, edge ranking, and behavioral clustering.
+3. **Streamlined LLM Services**:
+   - Optimize LLM-based services for faster predictions and cost efficiency.
 
 ---
 
