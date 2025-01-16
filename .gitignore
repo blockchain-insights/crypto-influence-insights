@@ -168,5 +168,6 @@ venv_miner/
 venv_validator/
 venv_validator_api/
 /ops/validator/backup/
+/ops/validator/ops/
 .env.validator.mainnet
 .env.miner.mainnet
