@@ -30,3 +30,7 @@ def run():
                 st.warning("No trends found for the given parameters.")
         except Exception as e:
             st.error(f"Failed to fetch engagement trends: {e}")
+
+# Main execution
+if __name__ == "__main__":
+    run()

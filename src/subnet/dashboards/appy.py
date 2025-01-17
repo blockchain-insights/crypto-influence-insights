@@ -7,10 +7,7 @@ from src.subnet.dashboards import (
     dashboard_activity_snapshot,
 )
 
-# Get query parameters
-query_params = st.experimental_get_query_params()
-dashboard_name = query_params.get("dashboard", ["Influencers"])[0]
-
+# Mapping dashboard names to their respective modules
 dashboards = {
     "Influencers": dashboard_influencers,
     "Engagement Trends": dashboard_engagement_trends,
@@ -19,7 +16,29 @@ dashboards = {
     "Activity Snapshot": dashboard_activity_snapshot,
 }
 
-if dashboard_name in dashboards:
-    dashboards[dashboard_name].run()
+# Get query parameters
+query_params = st.query_params
+dashboard_name = query_params.get("dashboard")
+
+# Main logic
+if dashboard_name:
+    # Extract the first query parameter value (full name)
+    dashboard_name = dashboard_name.strip()
+
+    # Check if the dashboard name exists in the dashboards dictionary
+    if dashboard_name in dashboards:
+        dashboards[dashboard_name].run()
+    else:
+        st.error(f"Dashboard '{dashboard_name}' not found.")
+        st.markdown("[Go back to main page](http://localhost:8501)")
 else:
-    st.error(f"Dashboard '{dashboard_name}' not found.")
+    # Main page with links to dashboards
+    st.title("Welcome to the Crypto Influence Insights App")
+    st.write("Select a dashboard to explore insights:")
+
+    # Dynamically generate links for dashboards
+    for display_name, _ in dashboards.items():
+        dashboard_url = f"?dashboard={display_name.replace(' ', '%20')}"
+        st.markdown(f"- [{display_name}]({dashboard_url})")
+
+

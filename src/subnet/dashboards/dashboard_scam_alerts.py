@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
+import pandas as pd
 from src.subnet.dashboards.config import API_BASE_URL
+
 
 def run():
     st.title("Real-Time Scam Alerts Dashboard")
@@ -20,9 +22,24 @@ def run():
             if response.status_code == 200 and response_data.get("results"):
                 results = response_data["results"]
 
+                # Convert results to a DataFrame for better formatting
+                df = pd.DataFrame(results)
+
                 st.write("Recent Scam Alerts:")
-                st.table(results)
+
+                # Display the DataFrame with scrollable width and height
+                st.dataframe(
+                    df.style.set_properties(**{'text-align': 'left'}),
+                    height=400,  # Adjust the height of the table
+                    use_container_width=True  # Automatically fit to container width
+                )
+
             else:
                 st.warning("No scam alerts found.")
         except Exception as e:
             st.error(f"Failed to fetch scam alerts: {e}")
+
+
+# Main execution
+if __name__ == "__main__":
+    run()
