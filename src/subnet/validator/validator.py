@@ -545,7 +545,7 @@ class Validator:
         """
         score_dict = cut_to_max_allowed_weights(score_dict, settings.MAX_ALLOWED_WEIGHTS)
         self.weights_storage.setup()
-        weighted_scores: Dict[int, int] = self.weights_storage.read()
+        weighted_scores: Dict[int, int] = dict()
 
         logger.debug(f"Setting weights for scores", score_dict=score_dict)
         score_sum = sum(score_dict.values())
